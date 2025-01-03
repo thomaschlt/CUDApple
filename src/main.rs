@@ -3,7 +3,8 @@ use clap::{ArgAction, Parser};
 use std::fs;
 use std::path::PathBuf;
 
-mod parser;
+pub mod metal;
+pub mod parser;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -91,6 +92,16 @@ fn main() -> Result<()> {
     for kernel in &cuda_program.kernels {
         log::info!("Found kernel: {}", kernel.name);
     }
+
+    // Generate Metal shader
+    let mut metal_shader = metal::MetalShader::new();
+    metal_shader.generate(&cuda_program)?;
+
+    // Write Metal shader to output file
+    let shader_path = args.output.join("kernel.metal");
+    fs::write(&shader_path, metal_shader.source()).context("Failed to write Metal shader")?;
+
+    log::info!("Generated Metal shader: {:?}", shader_path);
 
     Ok(())
 }

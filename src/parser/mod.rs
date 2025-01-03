@@ -1,4 +1,4 @@
-mod ast;
+pub mod ast;
 mod grammar;
 #[cfg(test)]
 mod tests;
