@@ -1,6 +1,7 @@
 use anyhow::Result;
 use std::fmt::Write;
 
+pub mod host;
 #[cfg(test)]
 mod tests;
 
@@ -24,12 +25,16 @@ impl MetalType {
 
 pub struct MetalShader {
     source: String,
+    uses_local_thread_index: bool,
+    uses_global_thread_index: bool,
 }
 
 impl MetalShader {
     pub fn new() -> Self {
         Self {
             source: String::new(),
+            uses_local_thread_index: false,
+            uses_global_thread_index: false,
         }
     }
 
@@ -47,24 +52,35 @@ impl MetalShader {
     }
 
     pub fn generate_kernel(&mut self, kernel: &crate::parser::KernelFunction) -> Result<()> {
-        // Generate kernel signature
+        // Analyze thread usage in kernel body
+        for stmt in &kernel.body.statements {
+            self.analyze_statements(stmt);
+        }
+
         write!(self.source, "kernel void {}(\n", kernel.name)?;
 
         // Generate parameters
         for (i, param) in kernel.parameters.iter().enumerate() {
-            self.generate_parameter(param, i == kernel.parameters.len() - 1)?;
+            self.generate_parameter(param, false)?;
         }
 
-        // Add thread position parameter
-        writeln!(
-            self.source,
-            "    uint thread_position_in_grid [[thread_position_in_grid]]"
-        )?;
+        // Add thread position parameters based on usage
+        if self.uses_local_thread_index {
+            writeln!(
+                self.source,
+                "    uint thread_position_in_threadgroup [[thread_position_in_threadgroup]],"
+            )?;
+        }
+        if self.uses_global_thread_index {
+            writeln!(
+                self.source,
+                "    uint thread_position_in_grid [[thread_position_in_grid]]"
+            )?;
+        }
+
         writeln!(self.source, ") {{")?;
 
-        // Generate kernel body
         self.generate_block(&kernel.body)?;
-
         writeln!(self.source, "}}\n")?;
         Ok(())
     }
@@ -139,9 +155,7 @@ impl MetalShader {
 
     pub fn generate_expression(&mut self, expr: &crate::parser::Expression) -> Result<()> {
         match expr {
-            crate::parser::Expression::Literal(lit) => match lit {
-                crate::parser::Literal::Integer(i) => write!(self.source, "{}", i)?,
-            },
+            crate::parser::Expression::IntegerLiteral(i) => write!(self.source, "{}", i)?,
             crate::parser::Expression::Variable(name) => {
                 write!(self.source, "{}", name)?;
             }
@@ -152,20 +166,20 @@ impl MetalShader {
                     " {} ",
                     match op {
                         crate::parser::Operator::Add => "+",
-                        crate::parser::Operator::Mul => "*",
+                        crate::parser::Operator::Multiply => "*",
                         crate::parser::Operator::LessThan => "<",
                     }
                 )?;
                 self.generate_expression(right)?;
             }
             crate::parser::Expression::ThreadIdx(_) => {
-                write!(self.source, "thread_position_in_grid")?;
+                write!(self.source, "thread_position_in_threadgroup")?;
             }
             crate::parser::Expression::BlockIdx(_) => {
-                write!(self.source, "(thread_position_in_grid / {})", 256)?; // Assuming fixed block size
+                write!(self.source, "threadgroup_position_in_grid")?;
             }
             crate::parser::Expression::BlockDim(_) => {
-                write!(self.source, "{}", 256)?; // Fixed block size for first version
+                write!(self.source, "threads_per_threadgroup")?;
             }
             crate::parser::Expression::ArrayAccess { array, index } => {
                 self.generate_expression(array)?;
@@ -173,12 +187,80 @@ impl MetalShader {
                 self.generate_expression(index)?;
                 write!(self.source, "]")?;
             }
+            crate::parser::Expression::SizeOf(t) => {
+                write!(self.source, "sizeof({})", t)?;
+            }
         }
         Ok(())
     }
 
     pub fn source(&self) -> &str {
         &self.source
+    }
+
+    fn analyze_thread_usage(&mut self, expr: &crate::parser::Expression) {
+        match expr {
+            crate::parser::Expression::ThreadIdx(_) => {
+                self.uses_local_thread_index = true;
+            }
+            crate::parser::Expression::BlockIdx(_) | crate::parser::Expression::BlockDim(_) => {
+                self.uses_global_thread_index = true;
+            }
+            _ => {}
+        }
+    }
+
+    fn analyze_statements(&mut self, stmt: &crate::parser::Statement) {
+        match stmt {
+            // For declarations, check the initializer expression
+            crate::parser::Statement::Declaration(decl) => {
+                if let Some(init) = &decl.initializer {
+                    self.analyze_expression(init);
+                }
+            }
+            // For assignments, check both target and value expressions
+            crate::parser::Statement::Assignment(assign) => {
+                self.analyze_expression(&assign.target);
+                self.analyze_expression(&assign.value);
+            }
+            // For if statements, check the condition and body
+            crate::parser::Statement::If(condition, block) => {
+                self.analyze_expression(condition);
+                for stmt in &block.statements {
+                    self.analyze_statements(stmt);
+                }
+            }
+        }
+    }
+
+    fn analyze_expression(&mut self, expr: &crate::parser::Expression) {
+        match expr {
+            // Direct thread index usage
+            crate::parser::Expression::ThreadIdx(_) => {
+                self.uses_local_thread_index = true;
+            }
+            // Block index or dimension implies grid calculation
+            crate::parser::Expression::BlockIdx(_) | crate::parser::Expression::BlockDim(_) => {
+                self.uses_global_thread_index = true;
+            }
+            // Recursively analyze binary operations
+            crate::parser::Expression::BinaryOp(left, _op, right) => {
+                self.analyze_expression(left);
+                self.analyze_expression(right);
+            }
+            // Recursively analyze array access
+            crate::parser::Expression::ArrayAccess { array, index } => {
+                self.analyze_expression(array);
+                self.analyze_expression(index);
+            }
+            // Other expressions don't affect thread indexing
+            _ => {}
+        }
+    }
+
+    pub fn generate_host_code(&self, config: host::MetalKernelConfig) -> String {
+        let host_gen = host::MetalHostGenerator::new(config, self.source().to_string());
+        host_gen.generate_swift_code()
     }
 }
 pub fn convert_type(cuda_type: &crate::parser::Type) -> MetalType {

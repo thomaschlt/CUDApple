@@ -8,6 +8,7 @@ peg::parser! {
             = s:$(['a'..='z' | 'A'..='Z' | '_']['a'..='z' | 'A'..='Z' | '0'..='9' | '_']*) {
                 s.to_string()
             }
+
         rule type_name() -> Type
             = base:base_type() _ pointer:pointer_suffix()? {
                 match pointer {
@@ -57,7 +58,7 @@ peg::parser! {
         rule multiplicative() -> Expression
             = head:primary() tail:(_ "*" _ expr:primary() { expr })* {
                 tail.into_iter().fold(head, |acc, expr| {
-                    Expression::BinaryOp(Box::new(acc), Operator::Mul, Box::new(expr))
+                    Expression::BinaryOp(Box::new(acc), Operator::Multiply, Box::new(expr))
                 })
             }
 
@@ -73,7 +74,7 @@ peg::parser! {
             / additive()
 
         rule number() -> Expression
-            = n:$(['0'..='9']+) { Expression::Literal(Literal::Integer(n.parse().unwrap())) }
+            = n:$(['0'..='9']+) { Expression::IntegerLiteral(n.parse().unwrap()) }
 
         rule array_access() -> Expression
             = array:identifier() _ "[" _ index:expression() _ "]" {
@@ -133,6 +134,11 @@ peg::parser! {
             }
 
         pub(crate) rule program() -> CudaProgram
-            = _ k:kernel_declaration() _ { CudaProgram { kernels: vec![k] } }
+            = _ kernels:kernel_declaration()* _ {
+                CudaProgram {
+                    kernels,
+                    host_statements: Vec::new(),
+                }
+            }
     }
 }

@@ -1,6 +1,46 @@
 #[derive(Debug, Clone, PartialEq)]
+pub enum HostStatement {
+    MemoryAllocation {
+        variable: String,
+        size: Expression,
+    },
+    MemoryCopy {
+        dst: String,
+        src: String,
+        size: Expression,
+        direction: MemcpyKind,
+    },
+    KernelLaunch {
+        kernel: String,
+        grid_dim: (Expression, Expression, Expression),
+        block_dim: (Expression, Expression, Expression),
+        arguments: Vec<Expression>,
+    },
+    MemoryFree {
+        variable: String,
+    },
+    VariableDeclaration {
+        var_type: Type,
+        name: String,
+    },
+    Assignment {
+        variable: String,
+        value: Expression,
+    },
+    DeviceSynchronize,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum MemcpyKind {
+    HostToDevice,
+    DeviceToHost,
+    DeviceToDevice,
+}
+
+#[derive(Debug)]
 pub struct CudaProgram {
     pub kernels: Vec<KernelFunction>,
+    pub host_statements: Vec<HostStatement>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -51,8 +91,9 @@ pub struct Assignment {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expression {
-    Literal(Literal),
     Variable(String),
+    IntegerLiteral(i64),
+    SizeOf(String),
     BinaryOp(Box<Expression>, Operator, Box<Expression>),
     ThreadIdx(Dimension),
     BlockIdx(Dimension),
@@ -64,20 +105,23 @@ pub enum Expression {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum Dimension {
-    X,
-}
-
-#[derive(Debug, Clone, PartialEq)]
 pub enum Operator {
+    Multiply,
     Add,
-    Mul,
     LessThan,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum Literal {
-    Integer(i64),
+pub enum Dimension {
+    X,
+}
+
+impl fmt::Display for Dimension {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Dimension::X => write!(f, "x"),
+        }
+    }
 }
 
 use std::fmt;
@@ -163,12 +207,13 @@ impl fmt::Display for Assignment {
 impl fmt::Display for Expression {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Expression::Literal(l) => write!(f, "{}", l),
             Expression::Variable(name) => write!(f, "{}", name),
+            Expression::IntegerLiteral(i) => write!(f, "{}", i),
+            Expression::SizeOf(name) => write!(f, "sizeof({})", name),
             Expression::BinaryOp(left, op, right) => write!(f, "({} {} {})", left, op, right),
-            Expression::ThreadIdx(dim) => write!(f, "threadIdx.{}", dim),
-            Expression::BlockIdx(dim) => write!(f, "blockIdx.{}", dim),
-            Expression::BlockDim(dim) => write!(f, "blockDim.{}", dim),
+            Expression::ThreadIdx(d) => write!(f, "ThreadIdx({})", d),
+            Expression::BlockIdx(d) => write!(f, "BlockIdx({})", d),
+            Expression::BlockDim(d) => write!(f, "BlockDim({})", d),
             Expression::ArrayAccess { array, index } => write!(f, "{}[{}]", array, index),
         }
     }
@@ -177,25 +222,9 @@ impl fmt::Display for Expression {
 impl fmt::Display for Operator {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Operator::Multiply => write!(f, "*"),
             Operator::Add => write!(f, "+"),
-            Operator::Mul => write!(f, "*"),
             Operator::LessThan => write!(f, "<"),
-        }
-    }
-}
-
-impl fmt::Display for Dimension {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Dimension::X => write!(f, "x"),
-        }
-    }
-}
-
-impl fmt::Display for Literal {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Literal::Integer(i) => write!(f, "{}", i),
         }
     }
 }

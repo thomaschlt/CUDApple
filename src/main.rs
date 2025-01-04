@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use clap::{ArgAction, Parser};
+use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 
@@ -86,11 +87,19 @@ fn main() -> Result<()> {
     let cuda_program = parser::parse_cuda(&cuda_source).context("Failed to parse CUDA program")?;
 
     log::debug!(
-        "Successfully parsed CUDA program with {} kernels",
-        cuda_program.kernels.len()
+        "Successfully parsed CUDA program with {} kernels and {} host statements",
+        cuda_program.kernels.len(),
+        cuda_program.host_statements.len()
     );
+
+    // Log kernels
     for kernel in &cuda_program.kernels {
         log::info!("Found kernel: {}", kernel.name);
+    }
+
+    // Log host statements
+    for stmt in &cuda_program.host_statements {
+        log::debug!("Found host statement: {:?}", stmt);
     }
 
     // Generate Metal shader
@@ -102,6 +111,19 @@ fn main() -> Result<()> {
     fs::write(&shader_path, metal_shader.source()).context("Failed to write Metal shader")?;
 
     log::info!("Generated Metal shader: {:?}", shader_path);
+
+    // Generate and write host code
+    let config = metal::host::MetalKernelConfig {
+        grid_size: (1, 1, 1),          // Default values for now
+        threadgroup_size: (256, 1, 1), // Common threadgroup size for 1D
+        buffer_sizes: std::collections::HashMap::new(),
+    };
+
+    let host_code = metal_shader.generate_host_code(config);
+    let host_path = args.output.join("KernelRunner.swift");
+    fs::write(&host_path, host_code).context("Failed to write Metal host code")?;
+
+    log::info!("Generated Metal host code: {:?}", host_path);
 
     Ok(())
 }
