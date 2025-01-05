@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use clap::{ArgAction, Parser};
-use std::collections::HashMap;
+
 use std::fs;
 use std::path::PathBuf;
 
@@ -88,17 +88,17 @@ fn main() -> Result<()> {
 
     log::debug!(
         "Successfully parsed CUDA program with {} kernels and {} host statements",
-        cuda_program.kernels.len(),
-        cuda_program.host_statements.len()
+        cuda_program.device_code.len(),
+        cuda_program.host_code.statements.len()
     );
 
     // Log kernels
-    for kernel in &cuda_program.kernels {
+    for kernel in &cuda_program.device_code {
         log::info!("Found kernel: {}", kernel.name);
     }
 
     // Log host statements
-    for stmt in &cuda_program.host_statements {
+    for stmt in &cuda_program.host_code.statements {
         log::debug!("Found host statement: {:?}", stmt);
     }
 
