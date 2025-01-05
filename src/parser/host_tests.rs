@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use super::super::host_grammar::host_parser;
+    use crate::parser::host_grammar::host_parser;
 
     #[test]
     fn test_basic_host_program() {

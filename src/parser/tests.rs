@@ -10,9 +10,9 @@ mod tests {
         let result = parse_cuda(input);
         assert!(result.is_ok(), "Parsing failed: {:?}", result);
         let program = result.unwrap();
-        assert_eq!(program.kernels[0].name, "simple");
-        assert_eq!(program.kernels[0].parameters.len(), 0);
-        println!("\nAST Structure:\n{}", program);
+        assert_eq!(program.device_code[0].name, "simple");
+        assert_eq!(program.device_code[0].parameters.len(), 0);
+        println!("\nAST Structure:\n{:?}", program);
     }
 
     #[test]
@@ -21,12 +21,12 @@ mod tests {
         let result = parse_cuda(input);
         assert!(result.is_ok(), "Parsing failed: {:?}", result);
         let program = result.unwrap();
-        let params = &program.kernels[0].parameters;
+        let params = &program.device_code[0].parameters;
         assert_eq!(params[0].param_type, Type::Int);
         assert_eq!(params[1].param_type, Type::Float);
         assert_eq!(params[2].param_type, Type::Pointer(Box::new(Type::Int)));
         assert_eq!(params[3].param_type, Type::Pointer(Box::new(Type::Float)));
-        println!("\nAST Structure:\n{}", program);
+        println!("\nAST Structure:\n{:?}", program);
     }
 
     #[test]
@@ -39,9 +39,9 @@ mod tests {
         let result = parse_cuda(input);
         assert!(result.is_ok(), "Parsing failed: {:?}", result);
         let program = result.unwrap();
-        let statements = &program.kernels[0].body.statements;
+        let statements = &program.device_code[0].body.statements;
         assert_eq!(statements.len(), 3);
-        println!("\nAST Structure:\n{}", program);
+        println!("\nAST Structure:\n{:?}", program);
     }
 
     #[test]
@@ -52,7 +52,7 @@ mod tests {
         }"#;
         let result = parse_cuda(input);
         assert!(result.is_ok(), "Parsing failed: {:?}", result);
-        println!("\nAST Structure:\n{}", result.unwrap());
+        println!("\nAST Structure:\n{:?}", result.unwrap());
     }
 
     #[test]
@@ -64,7 +64,7 @@ mod tests {
         }"#;
         let result = parse_cuda(input);
         assert!(result.is_ok(), "Parsing failed: {:?}", result);
-        println!("\nAST Structure:\n{}", result.unwrap());
+        println!("\nAST Structure:\n{:?}", result.unwrap());
     }
 
     #[test]
@@ -75,7 +75,7 @@ mod tests {
         }"#;
         let result = parse_cuda(input);
         assert!(result.is_ok(), "Parsing failed: {:?}", result);
-        println!("\nAST Structure:\n{}", result.unwrap());
+        println!("\nAST Structure:\n{:?}", result.unwrap());
     }
 
     #[test]
@@ -88,9 +88,9 @@ mod tests {
         let result = parse_cuda(input);
         assert!(result.is_ok(), "Parsing failed: {:?}", result);
         let program = result.unwrap();
-        let statements = &program.kernels[0].body.statements;
+        let statements = &program.device_code[0].body.statements;
         assert_eq!(statements.len(), 3);
-        println!("\nAST Structure:\n{}", program);
+        println!("\nAST Structure:\n{:?}", program);
     }
 
     #[test]
@@ -102,7 +102,7 @@ mod tests {
         }"#;
         let result = parse_cuda(input);
         assert!(result.is_ok(), "Parsing failed: {:?}", result);
-        println!("\nAST Structure:\n{}", result.unwrap());
+        println!("\nAST Structure:\n{:?}", result.unwrap());
     }
 
     #[test]
@@ -113,7 +113,7 @@ mod tests {
         }"#;
         let result = parse_cuda(input);
         assert!(result.is_ok(), "Parsing failed: {:?}", result);
-        println!("\nAST Structure:\n{}", result.unwrap());
+        println!("\nAST Structure:\n{:?}", result.unwrap());
     }
 
     #[test]
@@ -125,7 +125,7 @@ mod tests {
         }"#;
         let result = parse_cuda(input);
         assert!(result.is_ok(), "Parsing failed: {:?}", result);
-        println!("\nAST Structure:\n{}", result.unwrap());
+        println!("\nAST Structure:\n{:?}", result.unwrap());
     }
 
     #[test]
@@ -138,6 +138,6 @@ mod tests {
         }"#;
         let result = parse_cuda(input);
         assert!(result.is_ok(), "Parsing failed: {:?}", result);
-        println!("\nAST Structure:\n{}", result.unwrap());
+        println!("\nAST Structure:\n{:?}", result.unwrap());
     }
 }
