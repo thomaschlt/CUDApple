@@ -1,4 +1,5 @@
 use anyhow::Result;
+
 use std::fmt::Write;
 
 pub mod host;
@@ -44,7 +45,7 @@ impl MetalShader {
         writeln!(self.source, "using namespace metal;")?;
         writeln!(self.source)?;
 
-        for kernel in &program.kernels {
+        for kernel in &program.device_code {
             self.generate_kernel(kernel)?;
         }
 
@@ -111,19 +112,19 @@ impl MetalShader {
 
     pub fn generate_statement(&mut self, stmt: &crate::parser::Statement) -> Result<()> {
         match stmt {
-            crate::parser::Statement::Declaration(decl) => {
+            crate::parser::Statement::VariableDecl(decl) => {
                 self.generate_declaration(decl)?;
             }
-            crate::parser::Statement::Assignment(assign) => {
+            crate::parser::Statement::Assign(assign) => {
                 write!(self.source, "    ")?;
                 self.generate_assignment(assign)?;
                 writeln!(self.source, ";")?;
             }
-            crate::parser::Statement::If(cond, block) => {
+            crate::parser::Statement::IfStmt { condition, body } => {
                 write!(self.source, "    if (")?;
-                self.generate_expression(cond)?;
+                self.generate_expression(condition)?;
                 writeln!(self.source, ") {{")?;
-                self.generate_block(block)?;
+                self.generate_block(body)?;
                 writeln!(self.source, "    }}")?;
             }
         }
@@ -166,7 +167,9 @@ impl MetalShader {
                     " {} ",
                     match op {
                         crate::parser::Operator::Add => "+",
+                        crate::parser::Operator::Subtract => "-",
                         crate::parser::Operator::Multiply => "*",
+                        crate::parser::Operator::Divide => "/",
                         crate::parser::Operator::LessThan => "<",
                     }
                 )?;
@@ -212,21 +215,18 @@ impl MetalShader {
 
     fn analyze_statements(&mut self, stmt: &crate::parser::Statement) {
         match stmt {
-            // For declarations, check the initializer expression
-            crate::parser::Statement::Declaration(decl) => {
+            crate::parser::Statement::VariableDecl(decl) => {
                 if let Some(init) = &decl.initializer {
                     self.analyze_expression(init);
                 }
             }
-            // For assignments, check both target and value expressions
-            crate::parser::Statement::Assignment(assign) => {
+            crate::parser::Statement::Assign(assign) => {
                 self.analyze_expression(&assign.target);
                 self.analyze_expression(&assign.value);
             }
-            // For if statements, check the condition and body
-            crate::parser::Statement::If(condition, block) => {
+            crate::parser::Statement::IfStmt { condition, body } => {
                 self.analyze_expression(condition);
-                for stmt in &block.statements {
+                for stmt in &body.statements {
                     self.analyze_statements(stmt);
                 }
             }
@@ -269,5 +269,7 @@ pub fn convert_type(cuda_type: &crate::parser::Type) -> MetalType {
         crate::parser::Type::Float => MetalType::Float,
         crate::parser::Type::Pointer(inner) => MetalType::Buffer(Box::new(convert_type(inner))),
         crate::parser::Type::Void => MetalType::Int, // Void not used in our first version
+        crate::parser::Type::SizeT => MetalType::Int, // size_t maps to int in Metal
+        crate::parser::Type::Dim3 => MetalType::Int, // dim3 maps to int in Metal
     }
 }
