@@ -2,7 +2,7 @@
 
 #[cfg(test)]
 mod tests {
-    use crate::parser::{parse_cuda, Type};
+    use crate::parser::{parse_cuda, unified_ast::Type};
 
     #[test]
     fn test_basic_kernel_declaration() {

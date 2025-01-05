@@ -1,6 +1,7 @@
 #[cfg(test)]
 mod tests {
     use crate::parser::host_grammar::host_parser;
+    use crate::parser::unified_ast::{Expression, HostStatement, Type};
 
     #[test]
     fn test_basic_host_program() {
