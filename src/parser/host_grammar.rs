@@ -1,10 +1,15 @@
-use crate::parser::ast::{Expression, HostStatement, MemcpyKind, Operator, Type};
+use crate::parser::unified_ast::{
+    Declaration, Expression, HostStatement, MemcpyKind, Operator, Type,
+};
 
 peg::parser! {
     pub grammar host_parser() for str {
-        // Whitespace and comments
-        rule _() = [' ' | '\t' | '\n' | '\r']* comment()*
-        rule comment() = "//" (!"\n" [_])* "\n" / "/*" (!"*/" [_])* "*/"
+        // Whitespace handling
+        rule _() = quiet!{([' ' | '\t' | '\n' | '\r'] / comment())*}
+
+        rule comment() = block_comment() / line_comment()
+        rule block_comment() = "/*" (!"*/" [_])* "*/"
+        rule line_comment() = "//" (!"\n" [_])* ("\n" / ![_])
 
         // Basic building blocks
         rule identifier() -> String
@@ -17,37 +22,40 @@ peg::parser! {
 
         // Types
         rule type_name() -> Type
+            = pointer_type() / base_type()
+
+        rule base_type() -> Type
             = "int" { Type::Int }
             / "float" { Type::Float }
             / "void" { Type::Void }
+            / "size_t" { Type::SizeT }
+
+        rule pointer_type() -> Type
+            = t:base_type() _ "*" { Type::Pointer(Box::new(t)) }
 
         // Variable declarations
         rule variable_declaration() -> HostStatement
-            = t:type_name() _ "*" _ name:identifier() {
-                HostStatement::VariableDeclaration {
-                    var_type: Type::Pointer(Box::new(t)),
-                    name,
-                }
-            }
-            / t:type_name() _ name:identifier() _ "=" _ value:expression() {
-                HostStatement::Assignment {
-                    variable: name.clone(),
-                    value,
-                }
+            = t:type_name() _ name:identifier() _ "=" _ value:expression() {
+                HostStatement::Declaration(Declaration {
+                    var_type: t,
+                    name: name.clone(),
+                    initializer: Some(value)
+                })
             }
             / t:type_name() _ name:identifier() {
-                HostStatement::VariableDeclaration {
+                HostStatement::Declaration(Declaration {
                     var_type: t,
                     name,
-                }
+                    initializer: None
+                })
             }
 
         // Memory operations
         rule cuda_malloc() -> HostStatement
-            = "cudaMalloc" _ "(" _ "&" _ ptr:identifier() _ "," _ size:expression() _ ")" {
+            = "cudaMalloc" _ "(" _ ptr:malloc_pointer() _ "," _ size:expression() _ ")" {
                 HostStatement::MemoryAllocation {
                     variable: ptr,
-                    size: size
+                    size
                 }
             }
 
@@ -71,22 +79,21 @@ peg::parser! {
             / "cudaMemcpyDeviceToHost" { MemcpyKind::DeviceToHost }
             / "cudaMemcpyDeviceToDevice" { MemcpyKind::DeviceToDevice }
 
-        // Kernel launch
+        // Helper rule to enforce & operator
+        rule malloc_pointer() -> String
+            = "&" _ name:identifier() { name }
+
+        // Kernel launch with strict <<< >>> syntax
         rule kernel_launch() -> HostStatement
-            = kernel:identifier() _ "<<<" _
-              grid:expression() _ "," _
-              block:expression() _ ">>>" _
-              "(" _ args:kernel_args() _ ")" {
+            = name:identifier() _ "<<<" _ grid:expression() _ "," _ block:expression() _ ">>>"
+              _ "(" _ args:comma_list() _ ")" {
                 HostStatement::KernelLaunch {
-                    kernel,
+                    kernel: name,
                     grid_dim: (grid, Expression::IntegerLiteral(1), Expression::IntegerLiteral(1)),
                     block_dim: (block, Expression::IntegerLiteral(1), Expression::IntegerLiteral(1)),
                     arguments: args
                 }
             }
-
-        rule kernel_args() -> Vec<Expression>
-            = args:expression() ** (_ "," _) { args }
 
         // Expressions
         rule expression() -> Expression = precedence! {
@@ -100,25 +107,29 @@ peg::parser! {
             "(" _ e:expression() _ ")" { e }
         }
 
-        // Program structure
+        // Helper rule for comma-separated expressions
+        rule comma_list() -> Vec<Expression>
+            = e:expression() ** (_ "," _) { e }
+
+        // Program structure with better whitespace handling
         pub rule host_program() -> Vec<HostStatement>
-            = _
-              statements:(host_statement() ** _)
-              _ {
+            = _ statements:host_statement() ** (_ ";" _) _ ";"? _ {
                 statements
             }
 
         rule host_statement() -> HostStatement
-            = s:(cuda_malloc() /
+            = _ s:(
+                cuda_malloc() /
                 cuda_memcpy() /
                 kernel_launch() /
-                variable_declaration()) _ ";" {
+                variable_declaration()
+            ) _ {
                 s
             }
 
         // Add sizeof operator
         rule sizeof_expr() -> Expression
-            = "sizeof" _ "(" _ t:identifier() _ ")" {
+            = "sizeof" _ "(" _ t:type_name() _ ")" {
                 Expression::SizeOf(t)
             }
 

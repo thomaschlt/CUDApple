@@ -1,4 +1,4 @@
-use crate::parser::ast::*;
+use crate::parser::unified_ast::*;
 
 peg::parser! {
     pub(crate) grammar cuda_parser() for str {
@@ -103,10 +103,13 @@ peg::parser! {
             }
 
         rule statement() -> Statement
-            = decl:declaration() _ ";" { Statement::Declaration(decl) }
-            / assign:assignment() _ ";" { Statement::Assignment(assign) }
+            = decl:declaration() _ ";" { Statement::VariableDecl(decl) }
+            / assign:assignment() _ ";" { Statement::Assign(assign) }
             / "if" _ "(" _ cond:expression() _ ")" _ body:block() {
-                Statement::If(cond, body)
+                Statement::IfStmt {
+                    condition: cond,
+                    body
+                }
             }
 
         rule declaration() -> Declaration
@@ -136,8 +139,8 @@ peg::parser! {
         pub(crate) rule program() -> CudaProgram
             = _ kernels:kernel_declaration()* _ {
                 CudaProgram {
-                    kernels,
-                    host_statements: Vec::new(),
+                    device_code: kernels,
+                    host_code: HostCode { statements: Vec::new() },
                 }
             }
     }
