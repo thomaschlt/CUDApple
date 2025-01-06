@@ -1,6 +1,7 @@
 use crate::parser::unified_ast::{
-    Declaration, Expression, HostStatement, MemcpyKind, Operator, Type,
+    Assignment, Declaration, Expression, HostStatement, MemcpyKind, Operator, Type,
 };
+use crate::parser::HostCode;
 
 peg::parser! {
     pub grammar host_parser() for str {
@@ -112,17 +113,37 @@ peg::parser! {
             = e:expression() ** (_ "," _) { e }
 
         // Program structure with better whitespace handling
-        pub rule host_program() -> Vec<HostStatement>
+        pub rule host_program() -> HostCode
             = _ statements:host_statement() ** (_ ";" _) _ ";"? _ {
-                statements
+                HostCode {
+                    statements
+                }
             }
 
+        // Assignment rule
+        rule assignment() -> HostStatement
+            = target:identifier() _ "=" _ value:expression() {
+                HostStatement::Assignment(Assignment {
+                    target: Expression::Variable(target),
+                    value
+                })
+            }
+
+        // Device synchronize rule
+        rule device_synchronize() -> HostStatement
+            = "cudaDeviceSynchronize" _ "(" _ ")" {
+                HostStatement::DeviceSynchronize
+            }
+
+        // Update the host_statement rule to include the new types
         rule host_statement() -> HostStatement
             = _ s:(
                 cuda_malloc() /
                 cuda_memcpy() /
                 kernel_launch() /
-                variable_declaration()
+                variable_declaration() /
+                assignment() /
+                device_synchronize()
             ) _ {
                 s
             }
