@@ -18,6 +18,8 @@ mod tests {
             println!("Parse error: {}", e);
         }
         assert!(result.is_ok());
+        let host_code = result.unwrap();
+        assert!(!host_code.statements.is_empty());
     }
 
     #[test]
@@ -39,5 +41,32 @@ mod tests {
         let input = "vectorAdd<<gridSize, blockSize>>(d_a, d_b, d_c, n);"; // Missing <
         let result = host_parser::host_program(input);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_assignment() {
+        let input = "x = 42;";
+        let result = host_parser::host_program(input);
+        assert!(result.is_ok());
+        let host_code = result.unwrap();
+        match &host_code.statements[0] {
+            HostStatement::Assignment(assignment) => {
+                assert!(matches!(assignment.target, Expression::Variable(ref name) if name == "x"));
+                assert!(matches!(assignment.value, Expression::IntegerLiteral(42)));
+            }
+            _ => panic!("Expected Assignment statement"),
+        }
+    }
+
+    #[test]
+    fn test_device_synchronize() {
+        let input = "cudaDeviceSynchronize();";
+        let result = host_parser::host_program(input);
+        assert!(result.is_ok());
+        let host_code = result.unwrap();
+        assert!(matches!(
+            host_code.statements[0],
+            HostStatement::DeviceSynchronize
+        ));
     }
 }

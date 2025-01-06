@@ -2,7 +2,10 @@
 
 #[cfg(test)]
 mod tests {
-    use crate::parser::{parse_cuda, unified_ast::Type};
+    use crate::parser::{
+        parse_cuda,
+        unified_ast::{ParserError, Type},
+    };
 
     #[test]
     fn test_basic_kernel_declaration() {
@@ -139,5 +142,25 @@ mod tests {
         let result = parse_cuda(input);
         assert!(result.is_ok(), "Parsing failed: {:?}", result);
         println!("\nAST Structure:\n{:?}", result.unwrap());
+    }
+
+    #[test]
+    fn test_error_handling() {
+        // Test syntax error in host code
+        let input = r#"
+            int n = 1024
+            cudaMalloc(&d_a, size);  // Missing semicolon above
+        "#;
+        let result = parse_cuda(input);
+        assert!(matches!(result, Err(ParserError::HostCodeError(_))));
+
+        // Test syntax error in device code
+        let input = r#"
+            __global__ void kernel( {  // Missing closing parenthesis
+                int i = 0;
+            }
+        "#;
+        let result = parse_cuda(input);
+        assert!(matches!(result, Err(ParserError::DeviceCodeError(_))));
     }
 }
