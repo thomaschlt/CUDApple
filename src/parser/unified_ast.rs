@@ -142,3 +142,22 @@ pub struct Parameter {
     pub name: String,
     pub param_type: Type,
 }
+
+#[derive(Debug)]
+pub enum ParserError {
+    HostCodeError(String),
+    DeviceCodeError(String),
+    BoundaryError(String),
+}
+
+impl std::error::Error for ParserError {}
+
+impl fmt::Display for ParserError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ParserError::HostCodeError(msg) => write!(f, "Host code error: {}", msg),
+            ParserError::DeviceCodeError(msg) => write!(f, "Device code error: {}", msg),
+            ParserError::BoundaryError(msg) => write!(f, "Program boundary error: {}", msg),
+        }
+    }
+}
