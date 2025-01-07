@@ -287,4 +287,18 @@ mod tests {
 
         println!("\nParsed AST:\n{:#?}", program);
     }
+
+    #[test]
+    fn test_for_loop_with_assignment() {
+        let input = r#"__global__ void loop_test() {
+            for (int i = 0; i < 10; i = i + 1) {
+                int x = i * 2;
+            }
+        }"#;
+        let result = parse_cuda(input);
+        assert!(result.is_ok(), "Parsing failed: {:?}", result);
+        let program = result.unwrap();
+        println!("\nParsed AST:\n{:#?}", program);
+    }
+
 }
