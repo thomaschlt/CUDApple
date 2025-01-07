@@ -117,11 +117,34 @@ peg::parser! {
             n.parse().unwrap()
         }
 
+        // Add a special rule for for-loop initialization
+        rule for_init() -> Statement
+            = var_type:type_specifier() _ name:identifier() _ "=" _ e:expression() {
+                Statement::VariableDecl(Declaration {
+                    var_type,
+                    name,
+                    initializer: Some(e),
+                })
+            }
+
+        // Add a special rule for for-loop increment
+        rule for_increment() -> Statement
+            = target:identifier() _ "=" _ var:identifier() _ op:$(['+' | '-']) _ value:expression() {
+                Statement::Assign(Assignment {
+                    target: Expression::Variable(target),
+                    value: Expression::BinaryOp(
+                        Box::new(Expression::Variable(var)),
+                        if op == "+" { Operator::Add } else { Operator::Subtract },
+                        Box::new(value)
+                    )
+                })
+            }
+
         rule for_loop() -> Statement
             = "for" _ "(" _
-              init:(variable_declaration() / assignment()) _ ";" _
+              init:for_init() _ ";" _
               condition:expression() _ ";" _
-              increment:assignment() _ ")" _
+              increment:for_increment() _ ")" _
               body:block() {
                 Statement::ForLoop {
                     init: Box::new(init),
