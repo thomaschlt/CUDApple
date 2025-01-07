@@ -2,6 +2,8 @@ use anyhow::Result;
 
 use std::fmt::Write;
 
+use crate::parser::Qualifier;
+
 pub mod host;
 #[cfg(test)]
 mod tests;
@@ -40,9 +42,15 @@ impl MetalShader {
     }
 
     pub fn generate(&mut self, program: &crate::parser::CudaProgram) -> Result<()> {
-        // Add Metal shader header
+        // Add Metal shader header with math functions
         writeln!(self.source, "#include <metal_stdlib>")?;
+        writeln!(self.source, "#include <metal_math>")?;
+        writeln!(self.source, "#include <metal_geometric>")?;
         writeln!(self.source, "using namespace metal;")?;
+        writeln!(self.source)?;
+
+        // Add common math constants
+        writeln!(self.source, "constant float INFINITY = INFINITY;")?;
         writeln!(self.source)?;
 
         for kernel in &program.device_code {
@@ -92,9 +100,14 @@ impl MetalShader {
         is_last: bool,
     ) -> Result<()> {
         let metal_type = convert_type(&param.param_type);
+        let restrict_qualifier = match param.qualifier {
+            Qualifier::Restrict => "device const ",
+            Qualifier::None => "",
+        };
         write!(
             self.source,
-            "    {} {} [[buffer({})]]{}\n",
+            "    {}{} {} [[buffer({})]]{}\n",
+            restrict_qualifier,
             metal_type.to_metal_string(),
             param.name,
             param.name.chars().next().unwrap() as u8 - 'a' as u8,
@@ -112,6 +125,7 @@ impl MetalShader {
 
     pub fn generate_statement(&mut self, stmt: &crate::parser::Statement) -> Result<()> {
         match stmt {
+            crate::parser::Statement::Empty => writeln!(self.source, "    ;")?,
             crate::parser::Statement::VariableDecl(decl) => {
                 self.generate_declaration(decl)?;
             }
@@ -123,6 +137,21 @@ impl MetalShader {
             crate::parser::Statement::IfStmt { condition, body } => {
                 write!(self.source, "    if (")?;
                 self.generate_expression(condition)?;
+                writeln!(self.source, ") {{")?;
+                self.generate_block(body)?;
+                writeln!(self.source, "    }}")?;
+            }
+            crate::parser::Statement::ForLoop {
+                init,
+                condition,
+                increment,
+                body,
+            } => {
+                write!(self.source, "    for (")?;
+                self.generate_statement(init)?;
+                self.generate_expression(condition)?;
+                write!(self.source, "; ")?;
+                self.generate_statement(increment)?;
                 writeln!(self.source, ") {{")?;
                 self.generate_block(body)?;
                 writeln!(self.source, "    }}")?;
@@ -156,6 +185,7 @@ impl MetalShader {
 
     pub fn generate_expression(&mut self, expr: &crate::parser::Expression) -> Result<()> {
         match expr {
+            crate::parser::Expression::Number(n) => write!(self.source, "{}", n)?,
             crate::parser::Expression::IntegerLiteral(i) => write!(self.source, "{}", i)?,
             crate::parser::Expression::Variable(name) => {
                 write!(self.source, "{}", name)?;
@@ -174,6 +204,21 @@ impl MetalShader {
                     }
                 )?;
                 self.generate_expression(right)?;
+            }
+            crate::parser::Expression::FunctionCall(name, args) => {
+                match name.as_str() {
+                    "expf" => write!(self.source, "metal::exp")?,
+                    "max" => write!(self.source, "metal::fmax")?,
+                    _ => write!(self.source, "{}", name)?,
+                }
+                write!(self.source, "(")?;
+                for (i, arg) in args.iter().enumerate() {
+                    if i > 0 {
+                        write!(self.source, ", ")?;
+                    }
+                    self.generate_expression(arg)?;
+                }
+                write!(self.source, ")")?;
             }
             crate::parser::Expression::ThreadIdx(_) => {
                 write!(self.source, "thread_position_in_threadgroup")?;
@@ -215,6 +260,7 @@ impl MetalShader {
 
     fn analyze_statements(&mut self, stmt: &crate::parser::Statement) {
         match stmt {
+            crate::parser::Statement::Empty => {}
             crate::parser::Statement::VariableDecl(decl) => {
                 if let Some(init) = &decl.initializer {
                     self.analyze_expression(init);
@@ -230,11 +276,25 @@ impl MetalShader {
                     self.analyze_statements(stmt);
                 }
             }
+            crate::parser::Statement::ForLoop {
+                init,
+                condition,
+                increment,
+                body,
+            } => {
+                self.analyze_statements(init);
+                self.analyze_expression(condition);
+                self.analyze_statements(increment);
+                for stmt in &body.statements {
+                    self.analyze_statements(stmt);
+                }
+            }
         }
     }
 
     fn analyze_expression(&mut self, expr: &crate::parser::Expression) {
         match expr {
+            crate::parser::Expression::Number(_) => {}
             // Direct thread index usage
             crate::parser::Expression::ThreadIdx(_) => {
                 self.uses_local_thread_index = true;

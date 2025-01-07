@@ -13,9 +13,19 @@ pub struct HostCode {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Statement {
+    Empty,
     VariableDecl(Declaration),
     Assign(Assignment),
-    IfStmt { condition: Expression, body: Block },
+    IfStmt {
+        condition: Expression,
+        body: Block,
+    },
+    ForLoop {
+        init: Box<Statement>,
+        condition: Expression,
+        increment: Box<Statement>,
+        body: Block,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -71,6 +81,7 @@ pub struct Assignment {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expression {
+    Number(i64),
     Variable(String),
     IntegerLiteral(i64),
     SizeOf(Type),
@@ -82,6 +93,7 @@ pub enum Expression {
         array: Box<Expression>,
         index: Box<Expression>,
     },
+    FunctionCall(String, Vec<Expression>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -141,6 +153,7 @@ pub struct KernelFunction {
 pub struct Parameter {
     pub name: String,
     pub param_type: Type,
+    pub qualifier: Qualifier,
 }
 
 #[derive(Debug)]
@@ -160,4 +173,10 @@ impl fmt::Display for ParserError {
             ParserError::BoundaryError(msg) => write!(f, "Program boundary error: {}", msg),
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Qualifier {
+    Restrict,
+    None,
 }

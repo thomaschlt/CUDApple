@@ -4,7 +4,7 @@
 mod tests {
     use crate::parser::{
         parse_cuda,
-        unified_ast::{ParserError, Type},
+        unified_ast::{ParserError, Qualifier, Type},
     };
 
     #[test]
@@ -162,5 +162,42 @@ mod tests {
         "#;
         let result = parse_cuda(input);
         assert!(matches!(result, Err(ParserError::DeviceCodeError(_))));
+    }
+
+    #[test]
+    fn test_basic_restrict() {
+        let input = r#"__global__ void simple(float* __restrict__ a) {
+            // Empty kernel body
+        }"#;
+        let result = parse_cuda(input);
+        assert!(result.is_ok(), "Parsing failed: {:?}", result);
+        let program = result.unwrap();
+        assert_eq!(
+            program.device_code[0].parameters[0].qualifier,
+            Qualifier::Restrict
+        );
+        println!("\nParsed AST:\n{:?}", program);
+    }
+
+    #[test]
+    fn test_parser_debug() {
+        let input = r#"__global__ void simple(float* __restrict__ a) {}"#;
+        println!("\n=== Testing Parser ===");
+        println!("Input: {}", input);
+        let result = parse_cuda(input);
+        match result {
+            Ok(program) => {
+                println!("Success! Parsed AST:");
+                println!("{:#?}", program);
+                assert_eq!(
+                    program.device_code[0].parameters[0].qualifier,
+                    Qualifier::Restrict
+                );
+            }
+            Err(e) => {
+                println!("Parser failed: {:?}", e);
+                panic!("Parser should not fail");
+            }
+        }
     }
 }

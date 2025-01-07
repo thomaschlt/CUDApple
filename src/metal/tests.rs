@@ -52,4 +52,15 @@ mod tests {
         }"#;
         print_metal_translation(cuda_source);
     }
+
+    #[test]
+    fn test_math_functions() {
+        let cuda_source = r#"__global__ void math_test(float *out) {
+            int i = threadIdx.x;
+            float x = -1.0f * INFINITY;
+            float y = max(x, 0.0f);
+            out[i] = expf(y);
+        }"#;
+        print_metal_translation(cuda_source);
+    }
 }

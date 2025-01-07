@@ -40,10 +40,65 @@ impl MetalHostGenerator {
     }
 
     fn generate_init_method(&self, code: &mut String) {
-        // Initialize Metal device, command queue, and pipeline
+        code.push_str(
+            r#"    init() {
+        guard let device = MTLCreateSystemDefaultDevice() else {
+            fatalError("Metal is not supported on this device")
+        }
+        self.device = device
+        
+        guard let queue = device.makeCommandQueue() else {
+            fatalError("Failed to create command queue")
+        }
+        self.commandQueue = queue
+        
+        // Load and compile the kernel
+        let library = try! device.makeLibrary(source: """
+"#,
+        );
+        code.push_str(&self.shader);
+        code.push_str(
+            r#"""
+            , options: nil)
+            
+        guard let function = library.makeFunction(name: "kernel_main") else {
+            fatalError("Failed to create kernel function")
+        }
+        
+        self.pipeline = try! device.makeComputePipelineState(function: function)
+    }
+"#,
+        );
     }
 
     fn generate_run_method(&self, code: &mut String) {
-        // Generate buffer creation and kernel dispatch code
+        code.push_str(
+            r#"    func run(
+        inputs: [MTLBuffer],
+        gridSize: MTLSize,
+        threadGroupSize: MTLSize
+    ) {
+        guard let commandBuffer = commandQueue.makeCommandBuffer(),
+              let computeEncoder = commandBuffer.makeComputeCommandEncoder() else {
+            fatalError("Failed to create compute command encoder")
+        }
+        
+        computeEncoder.setComputePipelineState(pipeline)
+        
+        // Bind buffers
+        for (index, buffer) in inputs.enumerated() {
+            computeEncoder.setBuffer(buffer, offset: 0, index: index)
+        }
+        
+        // Dispatch threadgroups
+        computeEncoder.dispatchThreadgroups(gridSize, threadsPerThreadgroup: threadGroupSize)
+        computeEncoder.endEncoding()
+        
+        // Commit and wait
+        commandBuffer.commit()
+        commandBuffer.waitUntilCompleted()
+    }
+"#,
+        );
     }
 }
