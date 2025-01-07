@@ -5,6 +5,7 @@ mod tests {
     use crate::parser::{
         parse_cuda,
         unified_ast::{ParserError, Qualifier, Type},
+        Expression, Operator, Statement,
     };
 
     #[test]
@@ -180,6 +181,41 @@ mod tests {
     }
 
     #[test]
+    fn test_restrict_qualifier() {
+        let input = r#"__global__ void softmax_kernel_0(float* __restrict__ matd, float* __restrict__ resd, int M, int N) {
+            int row = blockDim.x * blockIdx.x + threadIdx.x;
+
+            if (row < M) {
+                // max
+                float m = -1 * INFINITY;
+                // norm factor
+                float L = 0.0f;
+
+                // 3 passes (not optimal)
+                for (int col = 0; col < N; col++) {
+                    int i = row * N + col;
+                    m = max(m, matd[i]);
+                }
+                for (int col = 0; col < N; col++) {
+                    int i = row * N + col;
+                    L += expf(matd[i] - m);
+                }
+                for (int col = 0; col < N; col++) {
+                    int i = row * N + col;
+                    resd[i] = expf(matd[i] - m) / L;
+                }
+            }
+        }"#;
+        let result = parse_cuda(input);
+        assert!(result.is_ok(), "Parsing failed: {:?}", result);
+        let program = result.unwrap();
+        assert_eq!(
+            program.device_code[0].parameters[0].qualifier,
+            Qualifier::Restrict
+        );
+    }
+
+    #[test]
     fn test_parser_debug() {
         let input = r#"__global__ void simple(float* __restrict__ a) {}"#;
         println!("\n=== Testing Parser ===");
@@ -199,5 +235,56 @@ mod tests {
                 panic!("Parser should not fail");
             }
         }
+    }
+
+    #[test]
+    fn test_for_loop() {
+        let input = r#"__global__ void loop_test() {
+            for (int i = 0; i < 10; i = i + 1) {
+                int x = i * 2;
+            }
+        }"#;
+        let result = parse_cuda(input);
+        assert!(result.is_ok(), "Parsing failed: {:?}", result);
+        let program = result.unwrap();
+
+        // Get the first statement from the kernel body
+        let statements = &program.device_code[0].body.statements;
+        assert_eq!(statements.len(), 1, "Expected one for-loop statement");
+
+        // Verify it's a ForLoop
+        if let Statement::ForLoop {
+            init,
+            condition,
+            increment: _,
+            body,
+        } = &statements[0]
+        {
+            // Check initialization
+            if let Statement::VariableDecl(decl) = &**init {
+                assert_eq!(decl.name, "i");
+                assert_eq!(decl.var_type, Type::Int);
+            } else {
+                panic!("Expected variable declaration as loop initializer");
+            }
+
+            // Check condition
+            if let Expression::BinaryOp(_, op, _) = condition {
+                assert!(matches!(op, Operator::LessThan));
+            } else {
+                panic!("Expected binary operation as condition");
+            }
+
+            // Check body contains one statement
+            assert_eq!(
+                body.statements.len(),
+                1,
+                "Expected one statement in loop body"
+            );
+        } else {
+            panic!("Expected ForLoop statement");
+        }
+
+        println!("\nParsed AST:\n{:#?}", program);
     }
 }

@@ -67,8 +67,11 @@ peg::parser! {
             / "void" { Type::Void }
 
         rule assignment() -> Statement
-            = target:expression() _ "=" _ value:expression() _ ";" {
-                Statement::Assign(Assignment { target, value })
+            = target:identifier() _ "=" _ value:expression() {
+                Statement::Assign(Assignment {
+                    target: Expression::Variable(target),
+                    value
+                })
             }
 
         rule if_statement() -> Statement
@@ -90,7 +93,8 @@ peg::parser! {
                 variable_declaration() /
                 assignment() /
                 if_statement() /
-                for_loop()
+                for_loop() /
+                empty_statement()
             ) _ {
                 s
             }
@@ -114,9 +118,10 @@ peg::parser! {
         }
 
         rule for_loop() -> Statement
-            = "for" _ "(" _ init:statement() _ ";" _
+            = "for" _ "(" _
+              init:(variable_declaration() / assignment()) _ ";" _
               condition:expression() _ ";" _
-              increment:statement() _ ")" _
+              increment:assignment() _ ")" _
               body:block() {
                 Statement::ForLoop {
                     init: Box::new(init),
