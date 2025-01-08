@@ -26,6 +26,11 @@ pub enum Statement {
         increment: Box<Statement>,
         body: Block,
     },
+    CompoundAssign {
+        target: Expression,
+        operator: Operator,
+        value: Expression,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -96,6 +101,7 @@ pub enum Expression {
     FunctionCall(String, Vec<Expression>),
     FloatLiteral(f32),
     Constant(String),
+    UnaryOp(UnaryOperator, Box<Expression>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -181,4 +187,9 @@ impl fmt::Display for ParserError {
 pub enum Qualifier {
     Restrict,
     None,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum UnaryOperator {
+    Negate,
 }

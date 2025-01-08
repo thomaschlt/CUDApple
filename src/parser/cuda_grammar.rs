@@ -159,7 +159,7 @@ peg::parser! {
 
         rule float_literal() -> Expression
             = n:$("-"? ['0'..='9']+ "." ['0'..='9']* "f"?) {
-                Expression::FloatLiteral(n.parse().unwrap())
+                Expression::FloatLiteral(n.trim_end_matches('f').parse().unwrap())
             }
 
         rule constant() -> Expression
@@ -176,6 +176,26 @@ peg::parser! {
         rule math_function() -> Expression
             = name:$("expf" / "max") "(" args:comma_list() ")" {
                 Expression::FunctionCall(name.to_string(), args)
+            }
+
+        rule unary_op() -> Expression
+            = "-" _ e:expression() {
+                Expression::UnaryOp(UnaryOperator::Negate, Box::new(e))
+            }
+
+        rule compound_assignment() -> Statement
+            = target:identifier() _ op:$("+=" / "-=" / "*=" / "/=") _ value:expression() {
+                Statement::CompoundAssign {
+                    target: Expression::Variable(target),
+                    operator: match op {
+                        "+=" => Operator::Add,
+                        "-=" => Operator::Subtract,
+                        "*=" => Operator::Multiply,
+                        "/=" => Operator::Divide,
+                        _ => unreachable!()
+                    },
+                    value
+                }
             }
     }
 }
