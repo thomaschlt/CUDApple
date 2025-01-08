@@ -109,6 +109,9 @@ peg::parser! {
             x:(@) _ "/" _ y:@ { Expression::BinaryOp(Box::new(x), Operator::Divide, Box::new(y)) }
             --
             n:number() { Expression::Number(n) }
+            f:float_literal() { f }
+            c:constant() { c }
+            m:math_function() { m }
             i:identifier() { Expression::Variable(i) }
             array_access()
             "(" _ e:expression() _ ")" { e }
@@ -152,6 +155,27 @@ peg::parser! {
                     increment: Box::new(increment),
                     body
                 }
+            }
+
+        rule float_literal() -> Expression
+            = n:$("-"? ['0'..='9']+ "." ['0'..='9']* "f"?) {
+                Expression::FloatLiteral(n.parse().unwrap())
+            }
+
+        rule constant() -> Expression
+            = "INFINITY" { Expression::Constant("INFINITY".to_string()) }
+
+        // Add this rule before math_function()
+        rule comma_list() -> Vec<Expression>
+            = first:expression() rest:(_ "," _ e:expression() { e })* {
+                let mut args = vec![first];
+                args.extend(rest);
+                args
+            }
+
+        rule math_function() -> Expression
+            = name:$("expf" / "max") "(" args:comma_list() ")" {
+                Expression::FunctionCall(name.to_string(), args)
             }
     }
 }

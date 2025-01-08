@@ -94,6 +94,8 @@ pub enum Expression {
         index: Box<Expression>,
     },
     FunctionCall(String, Vec<Expression>),
+    FloatLiteral(f32),
+    Constant(String),
 }
 
 #[derive(Debug, Clone, PartialEq)]
