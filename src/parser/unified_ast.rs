@@ -57,6 +57,23 @@ pub enum HostStatement {
     Declaration(Declaration),
     Assignment(Assignment),
     DeviceSynchronize,
+    EventCreate {
+        event: String,
+    },
+    EventRecord {
+        event: String,
+    },
+    EventSynchronize {
+        event: String,
+    },
+    EventElapsedTime {
+        milliseconds: String,
+        start: String,
+        end: String,
+    },
+    EventDestroy {
+        event: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]

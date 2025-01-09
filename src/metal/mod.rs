@@ -134,6 +134,27 @@ impl MetalShader {
                 self.generate_assignment(assign)?;
                 writeln!(self.source, ";")?;
             }
+            crate::parser::Statement::CompoundAssign {
+                target,
+                operator,
+                value,
+            } => {
+                write!(self.source, "    ")?;
+                self.generate_expression(target)?;
+                write!(
+                    self.source,
+                    " {}= ",
+                    match operator {
+                        crate::parser::Operator::Add => "+",
+                        crate::parser::Operator::Subtract => "-",
+                        crate::parser::Operator::Multiply => "*",
+                        crate::parser::Operator::Divide => "/",
+                        crate::parser::Operator::LessThan => "<",
+                    }
+                )?;
+                self.generate_expression(value)?;
+                writeln!(self.source, ";")?;
+            }
             crate::parser::Statement::IfStmt { condition, body } => {
                 write!(self.source, "    if (")?;
                 self.generate_expression(condition)?;
@@ -187,8 +208,16 @@ impl MetalShader {
         match expr {
             crate::parser::Expression::Number(n) => write!(self.source, "{}", n)?,
             crate::parser::Expression::IntegerLiteral(i) => write!(self.source, "{}", i)?,
+            crate::parser::Expression::FloatLiteral(f) => write!(self.source, "{}", f)?,
+            crate::parser::Expression::Constant(c) => write!(self.source, "{}", c)?,
             crate::parser::Expression::Variable(name) => {
                 write!(self.source, "{}", name)?;
+            }
+            crate::parser::Expression::UnaryOp(op, expr) => {
+                match op {
+                    crate::parser::UnaryOperator::Negate => write!(self.source, "-")?,
+                }
+                self.generate_expression(expr)?;
             }
             crate::parser::Expression::BinaryOp(left, op, right) => {
                 self.generate_expression(left)?;
@@ -270,6 +299,10 @@ impl MetalShader {
                 self.analyze_expression(&assign.target);
                 self.analyze_expression(&assign.value);
             }
+            crate::parser::Statement::CompoundAssign { target, value, .. } => {
+                self.analyze_expression(target);
+                self.analyze_expression(value);
+            }
             crate::parser::Statement::IfStmt { condition, body } => {
                 self.analyze_expression(condition);
                 for stmt in &body.statements {
@@ -319,7 +352,7 @@ impl MetalShader {
     }
 
     pub fn generate_host_code(&self, config: host::MetalKernelConfig) -> String {
-        let host_gen = host::MetalHostGenerator::new(config, self.source().to_string());
+        let mut host_gen = host::MetalHostGenerator::new(config, self.source().to_string());
         host_gen.generate_swift_code()
     }
 }

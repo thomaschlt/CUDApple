@@ -157,5 +157,35 @@ peg::parser! {
         // Update initializer rule
         rule initializer() -> Expression
             = expression()
+
+        rule cuda_event_create() -> HostStatement
+            = "cudaEventCreate" _ "(" _ "&" _ event:identifier() _ ")" {
+                HostStatement::EventCreate { event }
+            }
+
+        rule cuda_event_record() -> HostStatement
+            = "cudaEventRecord" _ "(" _ event:identifier() _ ")" {
+                HostStatement::EventRecord { event }
+            }
+
+        rule cuda_event_synchronize() -> HostStatement
+            = "cudaEventSynchronize" _ "(" _ event:identifier() _ ")" {
+                HostStatement::EventSynchronize { event }
+            }
+
+        rule cuda_event_elapsed_time() -> HostStatement
+            = "cudaEventElapsedTime" _ "(" _ "&" _ ms:identifier() _ "," _
+              start:identifier() _ "," _ end:identifier() _ ")" {
+                HostStatement::EventElapsedTime {
+                    milliseconds: ms,
+                    start,
+                    end
+                }
+            }
+
+        rule cuda_event_destroy() -> HostStatement
+            = "cudaEventDestroy" _ "(" _ event:identifier() _ ")" {
+                HostStatement::EventDestroy { event }
+            }
     }
 }

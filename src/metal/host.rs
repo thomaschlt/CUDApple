@@ -10,14 +10,19 @@ pub struct MetalKernelConfig {
 pub struct MetalHostGenerator {
     config: MetalKernelConfig,
     shader: String,
+    timing_enabled: bool,
 }
 
 impl MetalHostGenerator {
     pub fn new(config: MetalKernelConfig, shader: String) -> Self {
-        Self { config, shader }
+        Self {
+            config,
+            shader,
+            timing_enabled: false,
+        }
     }
 
-    pub fn generate_swift_code(&self) -> String {
+    pub fn generate_swift_code(&mut self) -> String {
         let mut code = String::new();
 
         // 1. Import statements
@@ -71,6 +76,41 @@ impl MetalHostGenerator {
         );
     }
 
+    fn generate_timing_support(&mut self, code: &mut String) {
+        code.push_str(
+            r#"
+    // Timing support
+    private var eventStartTimes: [String: CFTimeInterval] = [:]
+    private var eventEndTimes: [String: CFTimeInterval] = [:]
+    
+    private func createEvent(_ name: String) {
+        // Metal doesn't need explicit event creation
+    }
+    
+    private func recordEvent(_ name: String) {
+        eventStartTimes[name] = CACurrentMediaTime()
+    }
+    
+    private func synchronizeEvent(_ name: String) {
+        eventEndTimes[name] = CACurrentMediaTime()
+    }
+    
+    private func getElapsedTime(start: String, end: String) -> Float {
+        guard let startTime = eventStartTimes[start],
+              let endTime = eventEndTimes[end] else {
+            return 0.0
+        }
+        return Float((endTime - startTime) * 1000) // Convert to milliseconds
+    }
+    
+    private func destroyEvent(_ name: String) {
+        eventStartTimes.removeValue(forKey: name)
+        eventEndTimes.removeValue(forKey: name)
+    }
+"#,
+        );
+    }
+
     fn generate_run_method(&self, code: &mut String) {
         code.push_str(
             r#"    func run(
@@ -100,5 +140,27 @@ impl MetalHostGenerator {
     }
 "#,
         );
+
+        if self.timing_enabled {
+            code.push_str(
+                r#"
+        // Record start time if timing is enabled
+        if let startEvent = startEventName {
+            recordEvent(startEvent)
+        }
+"#,
+            );
+        }
+
+        if self.timing_enabled {
+            code.push_str(
+                r#"
+        // Record end time if timing is enabled
+        if let endEvent = endEventName {
+            synchronizeEvent(endEvent)
+        }
+"#,
+            );
+        }
     }
 }

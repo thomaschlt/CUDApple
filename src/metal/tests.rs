@@ -63,4 +63,25 @@ mod tests {
         }"#;
         print_metal_translation(cuda_source);
     }
+
+    #[test]
+    fn test_kernel_timing() {
+        let cuda_source = r#"
+            cudaEvent_t start, stop;
+            cudaEventCreate(&start);
+            cudaEventCreate(&stop);
+            
+            cudaEventRecord(start);
+            kernel<<<grid, block>>>(args);
+            cudaEventRecord(stop);
+            
+            cudaEventSynchronize(stop);
+            float ms = 0.0f;
+            cudaEventElapsedTime(&ms, start, stop);
+            
+            cudaEventDestroy(start);
+            cudaEventDestroy(stop);
+        "#;
+        print_metal_translation(cuda_source);
+    }
 }
