@@ -30,30 +30,43 @@ peg::parser! {
             / "float" { Type::Float }
             / "void" { Type::Void }
             / "size_t" { Type::SizeT }
+            / "cudaEvent_t" { Type::CudaEventT }
+            / "dim3" { Type::Dim3 }
 
         rule pointer_type() -> Type
             = t:base_type() _ "*" { Type::Pointer(Box::new(t)) }
 
         // Variable declarations
         rule variable_declaration() -> HostStatement
-            = t:type_name() _ name:identifier() _ "=" _ value:expression() {
-                HostStatement::Declaration(Declaration {
-                    var_type: t,
-                    name: name.clone(),
-                    initializer: Some(value)
-                })
+            = type_name:type_specifier() _ first:identifier() rest:(_ "," _ i:identifier() { i })* _ ";" {
+                if rest.is_empty() {
+                    HostStatement::Declaration(Declaration {
+                        var_type: type_name.clone(),
+                        name: first.to_string(),
+                        initializer: None
+                    })
+                } else {
+                    HostStatement::MultiDeclaration {
+                        var_type: type_name,
+                        names: {
+                            let mut names = vec![first.to_string()];
+                            names.extend(rest.into_iter().map(|s| s.to_string()));
+                            names
+                        }
+                    }
+                }
             }
-            / t:type_name() _ name:identifier() {
+            / type_name:type_specifier() _ name:identifier() _ "=" _ value:expression() _ ";" {
                 HostStatement::Declaration(Declaration {
-                    var_type: t,
-                    name,
-                    initializer: None
+                    var_type: type_name,
+                    name: name.to_string(),
+                    initializer: Some(value)
                 })
             }
 
         // Memory operations
         rule cuda_malloc() -> HostStatement
-            = "cudaMalloc" _ "(" _ ptr:malloc_pointer() _ "," _ size:expression() _ ")" {
+            = "cudaMalloc" _ "(" _ ptr:malloc_pointer() _ "," _ size:expression() _ ")" _ ";" {
                 HostStatement::MemoryAllocation {
                     variable: ptr,
                     size
@@ -104,6 +117,9 @@ peg::parser! {
             --
             x:(@) _ "*" _ y:@ { Expression::BinaryOp(Box::new(x), Operator::Multiply, Box::new(y)) }
             --
+            x:(@) _ "." _ y:identifier() { Expression::MemberAccess(Box::new(x), y) }
+            --
+            f:function_call() { f }
             sizeof:sizeof_expr() { sizeof }
             n:number() { Expression::IntegerLiteral(n) }
             i:identifier() { Expression::Variable(i) }
@@ -116,18 +132,16 @@ peg::parser! {
 
         // Program structure with better whitespace handling
         pub rule host_program() -> HostCode
-            = _ statements:host_statement() ** (_ ";" _) _ ";"? _ {
-                HostCode {
-                    statements
-                }
+            = _ s:host_statement()* _ {
+                HostCode { statements: s }
             }
 
         // Assignment rule
         rule assignment() -> HostStatement
-            = target:identifier() _ "=" _ value:expression() {
+            = var:identifier() _ "=" _ val:expression() _ ";" {
                 HostStatement::Assignment(Assignment {
-                    target: Expression::Variable(target),
-                    value
+                    target: Expression::Variable(var.to_string()),
+                    value: val
                 })
             }
 
@@ -138,11 +152,11 @@ peg::parser! {
             }
 
         // Add CUDA_CHECK macro support
-        rule cuda_check_macro() -> HostStatement
-            = "CUDA_CHECK" _ "(" _ expr:expression() _ ")" {
+        rule cuda_check_macro() -> HostStatement =
+            "CUDA_CHECK" _ "(" _ expr:cuda_check_expr() _ ")" _ ";" {
                 HostStatement::MacroCall {
                     name: "CUDA_CHECK".to_string(),
-                    arguments: vec![expr],
+                    arguments: vec![expr]
                 }
             }
 
@@ -181,13 +195,18 @@ peg::parser! {
             }
 
         // Update the host_statement rule to include cuda_event_operation
-        rule host_statement() -> HostStatement =
-            cuda_event_operation() /
-            kernel_launch() /
-            cuda_malloc() /
-            cuda_memcpy() /
-            cuda_free() /
-            device_synchronize()
+        pub rule host_statement() -> HostStatement
+            = _ s:(
+                cuda_check_macro() /
+                variable_declaration() /
+                assignment() /
+                dim3_declaration() /
+                cuda_malloc() /
+                cuda_memcpy() /
+                cuda_free() /
+                device_synchronize() /
+                cuda_event_operation()
+            ) _ { s }
 
         // Add sizeof operator
         rule sizeof_expr() -> Expression
@@ -199,17 +218,119 @@ peg::parser! {
         rule initializer() -> Expression
             = expression()
 
-        rule dim3_expr() -> (Expression, Expression, Expression)
-            = "dim3" _ "(" _ x:expression() _ ")" {
-                (x, Expression::Number(1), Expression::Number(1))
+        rule dim3_expr() -> (Expression, Expression, Expression) =
+            "dim3" _ "(" _
+            x:expression() _
+            y:("," _ e:expression() { e })? _
+            z:("," _ e:expression() { e })? _
+            ")" {
+                (
+                    x,
+                    y.unwrap_or(Expression::IntegerLiteral(1)),
+                    z.unwrap_or(Expression::IntegerLiteral(1))
+                )
             }
             / x:expression() {
-                (x, Expression::Number(1), Expression::Number(1))
+                (
+                    x,
+                    Expression::IntegerLiteral(1),
+                    Expression::IntegerLiteral(1)
+                )
             }
 
         rule cuda_free() -> HostStatement
             = "cudaFree" _ "(" _ var:identifier() _ ")" {
                 HostStatement::MemoryFree { variable: var }
+            }
+
+        rule string_literal() -> String
+            = "\"" s:$([^'"']*) "\"" { s.to_string() }
+
+        rule parameter_list() -> Vec<(Type, String)>
+            = first:(t:type_name() _ name:identifier() { (t, name) })
+              rest:(_ "," _ t:type_name() _ name:identifier() { (t, name) })* {
+                let mut params = vec![first];
+                params.extend(rest);
+                params
+            }
+
+        rule block() -> Vec<HostStatement>
+            = "{" _ s:host_statement()* "}" {
+                s
+            }
+
+        rule argument_list() -> Vec<Expression>
+            = first:expression() rest:(_ "," _ e:expression() { e })* {
+                let mut args = vec![first];
+                args.extend(rest);
+                args
+            }
+
+        rule dim3_declaration() -> HostStatement =
+            "dim3" _ name:identifier() _ "(" _
+            x:expression() _
+            y:("," _ e:expression() { e })? _
+            z:("," _ e:expression() { e })? _
+            ")" _ ";" {
+                HostStatement::Dim3Declaration {
+                    name: name.to_string(),
+                    x,
+                    y: Some(y.unwrap_or(Expression::IntegerLiteral(1))),
+                    z: Some(z.unwrap_or(Expression::IntegerLiteral(1)))
+                }
+            }
+
+        rule type_specifier() -> Type =
+            t:base_type() _ "*" { Type::Pointer(Box::new(t)) }
+            / base_type()
+
+        rule function_call() -> Expression
+            = name:identifier() _ "(" _ args:argument_list() _ ")" {
+                Expression::FunctionCall(name, args)
+            }
+
+        // Add cuda_api_call rule
+        rule cuda_api_call() -> Expression =
+            name:identifier() _ "(" _ args:argument_list() _ ")" {
+                Expression::FunctionCall(name, args)
+            }
+
+        rule cuda_check_expr() -> Expression =
+            event_create_expr() /
+            event_destroy_expr() /
+            event_record_expr() /
+            event_synchronize_expr()
+
+        rule event_create_expr() -> Expression =
+            "cudaEventCreate" _ "(" _ "&" _ name:identifier() _ ")" {
+                Expression::FunctionCall(
+                    "cudaEventCreate".to_string(),
+                    vec![Expression::AddressOf(Box::new(Expression::Variable(name)))]
+                )
+            }
+
+        rule event_destroy_expr() -> Expression =
+            "cudaEventDestroy" _ "(" _ event:identifier() _ ")" {
+                Expression::FunctionCall(
+                    "cudaEventDestroy".to_string(),
+                    vec![Expression::Variable(event)]
+                )
+            }
+
+        rule event_record_expr() -> Expression =
+            "cudaEventRecord" _ "(" _ event:identifier() _ ")" {
+                Expression::FunctionCall(
+                    "cudaEventRecord".to_string(),
+                    vec![Expression::Variable(event)]
+                )
+            }
+
+        rule event_synchronize_expr() -> Expression =
+            "cudaEventSynchronize" _ "(" _ event:identifier() _ ")" {
+                Expression::FunctionCall(
+                    "cudaEventSynchronize".to_string(),
+                    vec![Expression::Variable(event)]
+                )
             }
     }
 }

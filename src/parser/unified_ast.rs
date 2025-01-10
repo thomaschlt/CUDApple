@@ -51,6 +51,10 @@ pub enum HostStatement {
         size: Expression,
         direction: MemcpyKind,
     },
+    MultiDeclaration {
+        var_type: Type,
+        names: Vec<String>,
+    },
     KernelLaunch {
         kernel: String,
         grid_dim: (Expression, Expression, Expression),
@@ -95,6 +99,29 @@ pub enum HostStatement {
         value: Expression,
     },
     PrintStatement {
+        format: String,
+        arguments: Vec<Expression>,
+    },
+    FunctionDecl {
+        name: String,
+        return_type: Type,
+        parameters: Vec<Parameter>,
+        body: Block,
+    },
+    Dim3Declaration {
+        name: String,
+        x: Expression,
+        y: Option<Expression>,
+        z: Option<Expression>,
+    },
+    CudaEventDecl {
+        names: Vec<String>,
+    },
+    CudaApiCall {
+        function: String,
+        arguments: Vec<Expression>,
+    },
+    Printf {
         format: String,
         arguments: Vec<Expression>,
     },
@@ -143,14 +170,17 @@ pub enum Expression {
     FloatLiteral(f32),
     Constant(String),
     UnaryOp(UnaryOperator, Box<Expression>),
+    MemberAccess(Box<Expression>, String),
+    AddressOf(Box<Expression>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Type {
-    Void,
     Int,
     Float,
+    Void,
     SizeT,
+    CudaEventT,
     Dim3,
     Pointer(Box<Type>),
 }
@@ -163,6 +193,7 @@ impl fmt::Display for Type {
             Type::Float => write!(f, "float"),
             Type::SizeT => write!(f, "size_t"),
             Type::Dim3 => write!(f, "dim3"),
+            Type::CudaEventT => write!(f, "cudaEvent_t"),
             Type::Pointer(inner) => write!(f, "{}*", inner),
         }
     }
