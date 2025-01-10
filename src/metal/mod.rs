@@ -225,6 +225,14 @@ impl MetalShader {
             crate::parser::Expression::Variable(name) => {
                 write!(self.source, "{}", name)?;
             }
+            crate::parser::Expression::AddressOf(expr) => {
+                write!(self.source, "&")?;
+                self.generate_expression(expr)?;
+            }
+            crate::parser::Expression::MemberAccess(expr, member) => {
+                self.generate_expression(expr)?;
+                write!(self.source, ".{}", member)?;
+            }
             crate::parser::Expression::UnaryOp(op, expr) => {
                 match op {
                     crate::parser::UnaryOperator::Negate => write!(self.source, "-")?,
@@ -407,5 +415,6 @@ pub fn convert_type(cuda_type: &crate::parser::Type) -> MetalType {
         crate::parser::Type::Void => MetalType::Int, // Void not used in our first version
         crate::parser::Type::SizeT => MetalType::Int, // size_t maps to int in Metal
         crate::parser::Type::Dim3 => MetalType::Int, // dim3 maps to int in Metal
+        crate::parser::Type::CudaEventT => MetalType::Int, // cudaEvent_t maps to int in Metal
     }
 }
