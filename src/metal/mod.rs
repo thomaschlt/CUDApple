@@ -2,7 +2,7 @@ use anyhow::Result;
 
 use std::fmt::Write;
 
-use crate::parser::Qualifier;
+use crate::parser::unified_ast::{Expression, Qualifier, Statement};
 
 pub mod host;
 #[cfg(test)]
@@ -123,18 +123,30 @@ impl MetalShader {
         Ok(())
     }
 
-    pub fn generate_statement(&mut self, stmt: &crate::parser::Statement) -> Result<()> {
+    pub fn generate_statement(
+        &mut self,
+        stmt: &crate::parser::unified_ast::Statement,
+    ) -> Result<()> {
         match stmt {
-            crate::parser::Statement::Empty => writeln!(self.source, "    ;")?,
-            crate::parser::Statement::VariableDecl(decl) => {
+            crate::parser::unified_ast::Statement::Empty => writeln!(self.source, "    ;")?,
+            crate::parser::unified_ast::Statement::Include(_) => writeln!(self.source)?,
+            crate::parser::unified_ast::Statement::VariableDecl(decl) => {
                 self.generate_declaration(decl)?;
             }
-            crate::parser::Statement::Assign(assign) => {
+            crate::parser::unified_ast::Statement::MacroCall { name, arguments } => {
+                write!(self.source, "    ")?;
+                self.generate_macro_call(name, arguments)?;
+                writeln!(self.source)?;
+            }
+            crate::parser::unified_ast::Statement::MacroDefinition(_) => {
+                // Macros are handled at parse time, no need to generate code
+            }
+            crate::parser::unified_ast::Statement::Assign(assign) => {
                 write!(self.source, "    ")?;
                 self.generate_assignment(assign)?;
                 writeln!(self.source, ";")?;
             }
-            crate::parser::Statement::CompoundAssign {
+            crate::parser::unified_ast::Statement::CompoundAssign {
                 target,
                 operator,
                 value,
@@ -155,14 +167,14 @@ impl MetalShader {
                 self.generate_expression(value)?;
                 writeln!(self.source, ";")?;
             }
-            crate::parser::Statement::IfStmt { condition, body } => {
+            crate::parser::unified_ast::Statement::IfStmt { condition, body } => {
                 write!(self.source, "    if (")?;
                 self.generate_expression(condition)?;
                 writeln!(self.source, ") {{")?;
                 self.generate_block(body)?;
                 writeln!(self.source, "    }}")?;
             }
-            crate::parser::Statement::ForLoop {
+            crate::parser::unified_ast::Statement::ForLoop {
                 init,
                 condition,
                 increment,
@@ -290,6 +302,7 @@ impl MetalShader {
     fn analyze_statements(&mut self, stmt: &crate::parser::Statement) {
         match stmt {
             crate::parser::Statement::Empty => {}
+            crate::parser::Statement::Include(_) => {}
             crate::parser::Statement::VariableDecl(decl) => {
                 if let Some(init) = &decl.initializer {
                     self.analyze_expression(init);
@@ -322,6 +335,12 @@ impl MetalShader {
                     self.analyze_statements(stmt);
                 }
             }
+            crate::parser::Statement::MacroCall { name: _, arguments } => {
+                for arg in arguments {
+                    self.analyze_expression(arg);
+                }
+            }
+            crate::parser::Statement::MacroDefinition(_) => {}
         }
     }
 
@@ -354,6 +373,30 @@ impl MetalShader {
     pub fn generate_host_code(&self, config: host::MetalKernelConfig) -> String {
         let mut host_gen = host::MetalHostGenerator::new(config, self.source().to_string());
         host_gen.generate_swift_code()
+    }
+
+    fn generate_macro_call(&mut self, name: &str, args: &[Expression]) -> Result<()> {
+        match name {
+            "CUDA_CHECK" => {
+                write!(self.source, "if let error = ")?;
+                self.generate_expression(&args[0])?;
+                writeln!(self.source, " {{")?;
+                writeln!(self.source, "    fatalError(\"CUDA error: \\(error)\")")?;
+                writeln!(self.source, "}}")?;
+            }
+            _ => {
+                // Handle other macros or pass through unchanged
+                write!(self.source, "{}(", name)?;
+                for (i, arg) in args.iter().enumerate() {
+                    if i > 0 {
+                        write!(self.source, ", ")?;
+                    }
+                    self.generate_expression(arg)?;
+                }
+                write!(self.source, ")")?;
+            }
+        }
+        Ok(())
     }
 }
 pub fn convert_type(cuda_type: &crate::parser::Type) -> MetalType {

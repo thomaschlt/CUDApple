@@ -28,15 +28,28 @@ peg::parser! {
         // Placeholder rules - expand these based on your needs
         rule qualifier() -> Qualifier
             = "__restrict__" { Qualifier::Restrict }
-            / "__restrict" { Qualifier::Restrict }
             / { Qualifier::None }
 
         rule parameter() -> Parameter
-            = param_type:type_specifier() _ "*"? _ qual:qualifier()? _ name:identifier() {
+            = param_type:type_specifier() _ "*" _ "__restrict__" _ name:identifier() {
+                Parameter {
+                    param_type: Type::Pointer(Box::new(param_type)),
+                    name: name.to_string(),
+                    qualifier: Qualifier::Restrict
+                }
+            }
+            / param_type:type_specifier() _ "*" _ name:identifier() {
+                Parameter {
+                    param_type: Type::Pointer(Box::new(param_type)),
+                    name: name.to_string(),
+                    qualifier: Qualifier::None
+                }
+            }
+            / param_type:type_specifier() _ name:identifier() {
                 Parameter {
                     param_type,
                     name: name.to_string(),
-                    qualifier: qual.unwrap_or(Qualifier::None)
+                    qualifier: Qualifier::None
                 }
             }
 
@@ -48,14 +61,20 @@ peg::parser! {
             }
 
         rule block() -> Block
-            = "{" _ stmts:statement()* _ "}" {
-                Block { statements: stmts }
+            = "{" _ statements:statement()* _ "}" {
+                Block {
+                    statements
+                }
             }
 
         rule variable_declaration() -> Statement
-            = var_type:type_specifier() _ name:identifier() _ init:("=" _ e:expression() { e })? _ ";" {
+            = var_type:type_specifier() _ ptr:"*"? _ name:identifier() _ init:("=" _ e:expression() { e })? _ ";" {
                 Statement::VariableDecl(Declaration {
-                    var_type,
+                    var_type: if ptr.is_some() {
+                        Type::Pointer(Box::new(var_type))
+                    } else {
+                        var_type
+                    },
                     name,
                     initializer: init,
                 })
@@ -65,18 +84,22 @@ peg::parser! {
             = "int" { Type::Int }
             / "float" { Type::Float }
             / "void" { Type::Void }
+            / "dim3" { Type::Dim3 }
 
         rule assignment() -> Statement
-            = target:identifier() _ "=" _ value:expression() {
+            = target:(array_access() / (i:identifier() { Expression::Variable(i) })) _ "=" _ value:expression() _ ";" {
                 Statement::Assign(Assignment {
-                    target: Expression::Variable(target),
+                    target,
                     value
                 })
             }
 
         rule if_statement() -> Statement
             = "if" _ "(" _ condition:expression() _ ")" _ body:block() {
-                Statement::IfStmt { condition, body }
+                Statement::IfStmt {
+                    condition,
+                    body
+                }
             }
 
         rule array_access() -> Expression
@@ -92,8 +115,12 @@ peg::parser! {
             = _ s:(
                 variable_declaration() /
                 assignment() /
+                compound_assignment() /
                 if_statement() /
                 for_loop() /
+                include_statement() /
+                macro_definition() /
+                macro_call() /
                 empty_statement()
             ) _ {
                 s
@@ -108,12 +135,15 @@ peg::parser! {
             x:(@) _ "*" _ y:@ { Expression::BinaryOp(Box::new(x), Operator::Multiply, Box::new(y)) }
             x:(@) _ "/" _ y:@ { Expression::BinaryOp(Box::new(x), Operator::Divide, Box::new(y)) }
             --
-            n:number() { Expression::Number(n) }
+            "-" _ x:@ { Expression::UnaryOp(UnaryOperator::Negate, Box::new(x)) }
+            --
             f:float_literal() { f }
             c:constant() { c }
+            n:number() { Expression::Number(n) }
             m:math_function() { m }
+            t:thread_index() { t }
+            a:array_access() { a }
             i:identifier() { Expression::Variable(i) }
-            array_access()
             "(" _ e:expression() _ ")" { e }
         }
         rule number() -> i64 = n:$(['0'..='9']+) {
@@ -132,14 +162,20 @@ peg::parser! {
 
         // Add a special rule for for-loop increment
         rule for_increment() -> Statement
-            = target:identifier() _ "=" _ var:identifier() _ op:$(['+' | '-']) _ value:expression() {
+            = target:identifier() _ "++" {
+                Statement::Assign(Assignment {
+                    target: Expression::Variable(target.clone()),
+                    value: Expression::BinaryOp(
+                        Box::new(Expression::Variable(target)),
+                        Operator::Add,
+                        Box::new(Expression::Number(1))
+                    )
+                })
+            }
+            / target:identifier() _ "=" _ value:expression() {
                 Statement::Assign(Assignment {
                     target: Expression::Variable(target),
-                    value: Expression::BinaryOp(
-                        Box::new(Expression::Variable(var)),
-                        if op == "+" { Operator::Add } else { Operator::Subtract },
-                        Box::new(value)
-                    )
+                    value
                 })
             }
 
@@ -158,9 +194,15 @@ peg::parser! {
             }
 
         rule float_literal() -> Expression
-            = n:$("-"? ['0'..='9']+ "." ['0'..='9']* "f"?) {
+            = n:$("-"? ['0'..='9']+ "." ['0'..='9']+ "f") {
                 Expression::FloatLiteral(n.trim_end_matches('f').parse().unwrap())
             }
+            / n:$(['0'..='9']+ "." ['0'..='9']+ "f") {
+                Expression::FloatLiteral(n.trim_end_matches('f').parse().unwrap())
+            }
+            / "1.0f" { Expression::FloatLiteral(1.0) }
+            / "0.0f" { Expression::FloatLiteral(0.0) }
+            / "-1.0f" { Expression::FloatLiteral(-1.0) }
 
         rule constant() -> Expression
             = "INFINITY" { Expression::Constant("INFINITY".to_string()) }
@@ -174,7 +216,7 @@ peg::parser! {
             }
 
         rule math_function() -> Expression
-            = name:$("expf" / "max") "(" args:comma_list() ")" {
+            = name:$("expf" / "max") _ "(" _ args:comma_list() _ ")" {
                 Expression::FunctionCall(name.to_string(), args)
             }
 
@@ -197,5 +239,72 @@ peg::parser! {
                     value
                 }
             }
+
+        // Add macro definition rules
+        rule macro_definition() -> Statement
+            = "#define" _ name:identifier() _ "(" _ params:macro_params() _ ")" _ body:macro_body() {
+                Statement::MacroDefinition(MacroDefinition::FunctionLike {
+                    name,
+                    parameters: params,
+                    body: body.trim().to_string(),
+                })
+            }
+            / "#define" _ name:identifier() _ value:macro_body() {
+                Statement::MacroDefinition(MacroDefinition::ObjectLike {
+                    name,
+                    value: value.trim().to_string(),
+                })
+            }
+
+        rule macro_params() -> Vec<String>
+            = first:identifier() rest:(_ "," _ p:identifier() { p })* {
+                let mut params = vec![first];
+                params.extend(rest);
+                params
+            }
+
+        rule macro_body() -> String
+            = body:$([^'\n']*) _ { body.to_string() }
+
+        // Add macro call rule
+        rule macro_call() -> Statement
+            = name:identifier() _ "(" _ args:macro_args() _ ")" {
+                Statement::MacroCall {
+                    name,
+                    arguments: args,
+                }
+            }
+
+        rule macro_args() -> Vec<Expression>
+            = args:comma_list()? {
+                args.unwrap_or_default()
+            }
+
+        // Add this before the existing grammar rules
+        rule include_statement() -> Statement
+            = "#include" _ "<" path:$([^'>']* ) ">" {
+                Statement::Include(path.to_string())
+            }
+            / "#include" _ "\"" path:$([^'"']* ) "\"" {
+                Statement::Include(path.to_string())
+            }
+
+        // Add this before the expression() rule
+        rule cuda_builtin() -> Expression
+            = "CEIL_DIV" _ "(" _ a:expression() _ "," _ b:expression() _ ")" {
+                Expression::FunctionCall("CEIL_DIV".to_string(), vec![a, b])
+            }
+            / "INFINITY" { Expression::Constant("INFINITY".to_string()) }
+
+        rule thread_index() -> Expression
+            = "threadIdx" "." "x" { Expression::ThreadIdx(Dimension::X) }
+            / "threadIdx" "." "y" { Expression::ThreadIdx(Dimension::Y) }
+            / "threadIdx" "." "z" { Expression::ThreadIdx(Dimension::Z) }
+            / "blockIdx" "." "x" { Expression::BlockIdx(Dimension::X) }
+            / "blockIdx" "." "y" { Expression::BlockIdx(Dimension::Y) }
+            / "blockIdx" "." "z" { Expression::BlockIdx(Dimension::Z) }
+            / "blockDim" "." "x" { Expression::BlockDim(Dimension::X) }
+            / "blockDim" "." "y" { Expression::BlockDim(Dimension::Y) }
+            / "blockDim" "." "z" { Expression::BlockDim(Dimension::Z) }
     }
 }

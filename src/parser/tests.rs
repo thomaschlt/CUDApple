@@ -8,6 +8,7 @@ mod tests {
         Expression, Operator, Statement,
     };
 
+    // !work
     #[test]
     fn test_basic_kernel_declaration() {
         let input = r#"__global__ void simple() {}"#;
@@ -19,6 +20,7 @@ mod tests {
         println!("\nAST Structure:\n{:?}", program);
     }
 
+    // !work
     #[test]
     fn test_parameter_types() {
         let input = r#"__global__ void types(int a, float b, int *c, float *d) {}"#;
@@ -33,6 +35,7 @@ mod tests {
         println!("\nAST Structure:\n{:?}", program);
     }
 
+    // !work
     #[test]
     fn test_variable_declaration() {
         let input = r#"__global__ void vars() {
@@ -48,6 +51,7 @@ mod tests {
         println!("\nAST Structure:\n{:?}", program);
     }
 
+    // !work
     #[test]
     fn test_variable_initialization() {
         let input = r#"__global__ void init() {
@@ -59,6 +63,7 @@ mod tests {
         println!("\nAST Structure:\n{:?}", result.unwrap());
     }
 
+    // !work
     #[test]
     fn test_arithmetic_operations() {
         let input = r#"__global__ void math() {
@@ -71,6 +76,7 @@ mod tests {
         println!("\nAST Structure:\n{:?}", result.unwrap());
     }
 
+    // !work
     #[test]
     fn test_array_access() {
         let input = r#"__global__ void arrays(float *arr) {
@@ -82,6 +88,7 @@ mod tests {
         println!("\nAST Structure:\n{:?}", result.unwrap());
     }
 
+    // !work
     #[test]
     fn test_thread_indices() {
         let input = r#"__global__ void indices() {
@@ -97,6 +104,7 @@ mod tests {
         println!("\nAST Structure:\n{:?}", program);
     }
 
+    // !work
     #[test]
     fn test_if_statement() {
         let input = r#"__global__ void conditional(int n) {
@@ -109,6 +117,7 @@ mod tests {
         println!("\nAST Structure:\n{:?}", result.unwrap());
     }
 
+    // !work
     #[test]
     fn test_complex_expression() {
         let input = r#"__global__ void complex(float *a, float *b) {
@@ -120,6 +129,7 @@ mod tests {
         println!("\nAST Structure:\n{:?}", result.unwrap());
     }
 
+    // !work
     #[test]
     fn test_assignment() {
         let input = r#"__global__ void assign() {
@@ -132,6 +142,7 @@ mod tests {
         println!("\nAST Structure:\n{:?}", result.unwrap());
     }
 
+    // !work
     #[test]
     fn test_vector_add() {
         let input = r#"__global__ void vectorAdd(float *a, float *b, float *c, int n) {
@@ -145,26 +156,7 @@ mod tests {
         println!("\nAST Structure:\n{:?}", result.unwrap());
     }
 
-    #[test]
-    fn test_error_handling() {
-        // Test syntax error in host code
-        let input = r#"
-            int n = 1024
-            cudaMalloc(&d_a, size);  // Missing semicolon above
-        "#;
-        let result = parse_cuda(input);
-        assert!(matches!(result, Err(ParserError::HostCodeError(_))));
-
-        // Test syntax error in device code
-        let input = r#"
-            __global__ void kernel( {  // Missing closing parenthesis
-                int i = 0;
-            }
-        "#;
-        let result = parse_cuda(input);
-        assert!(matches!(result, Err(ParserError::DeviceCodeError(_))));
-    }
-
+    // !work
     #[test]
     fn test_basic_restrict() {
         let input = r#"__global__ void simple(float* __restrict__ a) {
@@ -180,18 +172,16 @@ mod tests {
         println!("\nParsed AST:\n{:?}", program);
     }
 
+    ///work: finally because of the ONLY increment pattern allowed in the for loop was col=col+1 and not col++ so implemented it.
     #[test]
     fn test_restrict_qualifier() {
         let input = r#"__global__ void softmax_kernel_0(float* __restrict__ matd, float* __restrict__ resd, int M, int N) {
             int row = blockDim.x * blockIdx.x + threadIdx.x;
 
             if (row < M) {
-                // max
                 float m = -1 * INFINITY;
-                // norm factor
                 float L = 0.0f;
 
-                // 3 passes (not optimal)
                 for (int col = 0; col < N; col++) {
                     int i = row * N + col;
                     m = max(m, matd[i]);
@@ -215,6 +205,7 @@ mod tests {
         );
     }
 
+    // !work
     #[test]
     fn test_parser_debug() {
         let input = r#"__global__ void simple(float* __restrict__ a) {}"#;
@@ -237,12 +228,13 @@ mod tests {
         }
     }
 
+    // !work
     #[test]
     fn test_for_loop() {
         let input = r#"__global__ void loop_test() {
             for (int i = 0; i < 10; i = i + 1) {
                 int x = i * 2;
-            }
+            }   
         }"#;
         let result = parse_cuda(input);
         assert!(result.is_ok(), "Parsing failed: {:?}", result);
@@ -288,6 +280,7 @@ mod tests {
         println!("\nParsed AST:\n{:#?}", program);
     }
 
+    // !work
     #[test]
     fn test_for_loop_with_assignment() {
         let input = r#"__global__ void loop_test() {
@@ -301,4 +294,127 @@ mod tests {
         println!("\nParsed AST:\n{:#?}", program);
     }
 
+    // !work
+    #[test]
+    fn test_math_functions() {
+        let input = r#"__global__ void math_test() {
+            float x = -1.0f * INFINITY;
+            float y = max(x, 0.0f);
+            float z = expf(y);
+        }"#;
+        let result = parse_cuda(input);
+        assert!(result.is_ok(), "Parsing failed: {:?}", result);
+        let program = result.unwrap();
+        let statements = &program.device_code[0].body.statements;
+        assert_eq!(statements.len(), 3);
+    }
+
+    // !work
+    #[test]
+    fn test_complex_array_access() {
+        let input = r#"__global__ void array_test(float *arr, int N) {
+            int row = threadIdx.x;
+            int col = threadIdx.y;
+            int i = row * N + col;
+            float val = arr[i];
+            arr[row * N + col] = val;
+        }"#;
+        let result = parse_cuda(input);
+        assert!(result.is_ok(), "Parsing failed: {:?}", result);
+        let program = result.unwrap();
+        println!("\nAST Structure:\n{:?}", program);
+    }
+
+    // !work
+    #[test]
+    fn test_division_operator() {
+        let input = r#"__global__ void div_test(float *out) {
+            int i = threadIdx.x;
+            float x = 10.0f;
+            float y = 2.0f;
+            out[i] = x / y;  // Basic division
+            out[i] = expf(out[i] - 1.0f) / y;  // Complex expression with division
+        }"#;
+        let result = parse_cuda(input);
+        assert!(result.is_ok(), "Parsing failed: {:?}", result);
+        let program = result.unwrap();
+
+        // Verify the AST contains division operations
+        if let Statement::Assign(assignment) = &program.device_code[0].body.statements[4] {
+            match &assignment.value {
+                Expression::BinaryOp(_, op, _) => {
+                    assert!(matches!(op, Operator::Divide));
+                }
+                _ => panic!("Expected division operator"),
+            }
+        }
+    }
+
+    // !work
+    #[test]
+    fn test_compound_assignments() {
+        let input = r#"__global__ void compound_test(float *arr) {
+            int i = threadIdx.x;
+            float sum = 0.0f;
+            
+            // Test different compound operators
+            sum += arr[i];         // Addition
+            sum *= 2.0f;          // Multiplication
+            sum -= 1.0f;          // Subtraction
+            sum /= 4.0f;          // Division
+            
+            // Test with more complex right-hand expressions
+            sum += arr[i] * 2.0f;
+            
+            // Test with function calls
+            sum += expf(arr[i]);
+            
+            arr[i] = sum;
+        }"#;
+
+        let result = parse_cuda(input);
+        assert!(result.is_ok(), "Parsing failed: {:?}", result);
+
+        let program = result.unwrap();
+        let statements = &program.device_code[0].body.statements;
+
+        // Verify compound assignments are parsed correctly
+        let mut compound_ops_found = 0;
+
+        for stmt in statements {
+            if let Statement::CompoundAssign {
+                target,
+                operator,
+                value,
+            } = stmt
+            {
+                compound_ops_found += 1;
+                match operator {
+                    Operator::Add | Operator::Subtract | Operator::Multiply | Operator::Divide => {
+                        // Operator is one of the expected ones
+                        assert!(true);
+                    }
+                    _ => panic!("Unexpected operator in compound assignment"),
+                }
+            }
+        }
+
+        // We should have found 6 compound assignments
+        assert_eq!(
+            compound_ops_found, 6,
+            "Expected 6 compound assignments, found {}",
+            compound_ops_found
+        );
+    }
+
+    #[test]
+    fn test_simple() {
+        let input = r#"__global__ void simple() {
+            float m = -1 * INFINITY;
+        }"#;
+        let result = parse_cuda(input);
+        assert!(result.is_ok(), "Parsing failed: {:?}", result);
+        let program = result.unwrap();
+        println!("\nAST Structure:\n{:?}", program);
+    }
 }

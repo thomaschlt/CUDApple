@@ -86,12 +86,14 @@ peg::parser! {
 
         // Kernel launch with strict <<< >>> syntax
         rule kernel_launch() -> HostStatement
-            = name:identifier() _ "<<<" _ grid:expression() _ "," _ block:expression() _ ">>>"
-              _ "(" _ args:comma_list() _ ")" {
+            = name:identifier() _ "<<<" _
+              grid:dim3_expr() _ "," _
+              block:dim3_expr() _ ">>>" _
+              "(" _ args:comma_list() _ ")" {
                 HostStatement::KernelLaunch {
                     kernel: name,
-                    grid_dim: (grid, Expression::IntegerLiteral(1), Expression::IntegerLiteral(1)),
-                    block_dim: (block, Expression::IntegerLiteral(1), Expression::IntegerLiteral(1)),
+                    grid_dim: grid,
+                    block_dim: block,
                     arguments: args
                 }
             }
@@ -135,18 +137,57 @@ peg::parser! {
                 HostStatement::DeviceSynchronize
             }
 
-        // Update the host_statement rule to include the new types
-        rule host_statement() -> HostStatement
-            = _ s:(
-                cuda_malloc() /
-                cuda_memcpy() /
-                kernel_launch() /
-                variable_declaration() /
-                assignment() /
-                device_synchronize()
-            ) _ {
-                s
+        // Add CUDA_CHECK macro support
+        rule cuda_check_macro() -> HostStatement
+            = "CUDA_CHECK" _ "(" _ expr:expression() _ ")" {
+                HostStatement::MacroCall {
+                    name: "CUDA_CHECK".to_string(),
+                    arguments: vec![expr],
+                }
             }
+
+        // Add CUDA Event operations
+        rule cuda_event_operation() -> HostStatement
+            = event_create() / event_record() / event_synchronize() / event_elapsed_time() / event_destroy()
+
+        rule event_create() -> HostStatement
+            = "cudaEventCreate" _ "(" _ "&" _ name:identifier() _ ")" {
+                HostStatement::EventCreate { event: name }
+            }
+
+        rule event_record() -> HostStatement
+            = "cudaEventRecord" _ "(" _ event:identifier() _ ")" {
+                HostStatement::EventRecord { event }
+            }
+
+        rule event_synchronize() -> HostStatement
+            = "cudaEventSynchronize" _ "(" _ event:identifier() _ ")" {
+                HostStatement::EventSynchronize { event }
+            }
+
+        rule event_elapsed_time() -> HostStatement
+            = "cudaEventElapsedTime" _ "(" _ "&" _ var:identifier() _ "," _
+              start:identifier() _ "," _ stop:identifier() _ ")" {
+                HostStatement::EventElapsedTime {
+                    milliseconds: var,
+                    start: start,
+                    end: stop
+                }
+            }
+
+        rule event_destroy() -> HostStatement
+            = "cudaEventDestroy" _ "(" _ event:identifier() _ ")" {
+                HostStatement::EventDestroy { event }
+            }
+
+        // Update the host_statement rule to include cuda_event_operation
+        rule host_statement() -> HostStatement =
+            cuda_event_operation() /
+            kernel_launch() /
+            cuda_malloc() /
+            cuda_memcpy() /
+            cuda_free() /
+            device_synchronize()
 
         // Add sizeof operator
         rule sizeof_expr() -> Expression
@@ -158,34 +199,17 @@ peg::parser! {
         rule initializer() -> Expression
             = expression()
 
-        rule cuda_event_create() -> HostStatement
-            = "cudaEventCreate" _ "(" _ "&" _ event:identifier() _ ")" {
-                HostStatement::EventCreate { event }
+        rule dim3_expr() -> (Expression, Expression, Expression)
+            = "dim3" _ "(" _ x:expression() _ ")" {
+                (x, Expression::Number(1), Expression::Number(1))
+            }
+            / x:expression() {
+                (x, Expression::Number(1), Expression::Number(1))
             }
 
-        rule cuda_event_record() -> HostStatement
-            = "cudaEventRecord" _ "(" _ event:identifier() _ ")" {
-                HostStatement::EventRecord { event }
-            }
-
-        rule cuda_event_synchronize() -> HostStatement
-            = "cudaEventSynchronize" _ "(" _ event:identifier() _ ")" {
-                HostStatement::EventSynchronize { event }
-            }
-
-        rule cuda_event_elapsed_time() -> HostStatement
-            = "cudaEventElapsedTime" _ "(" _ "&" _ ms:identifier() _ "," _
-              start:identifier() _ "," _ end:identifier() _ ")" {
-                HostStatement::EventElapsedTime {
-                    milliseconds: ms,
-                    start,
-                    end
-                }
-            }
-
-        rule cuda_event_destroy() -> HostStatement
-            = "cudaEventDestroy" _ "(" _ event:identifier() _ ")" {
-                HostStatement::EventDestroy { event }
+        rule cuda_free() -> HostStatement
+            = "cudaFree" _ "(" _ var:identifier() _ ")" {
+                HostStatement::MemoryFree { variable: var }
             }
     }
 }

@@ -13,6 +13,7 @@ pub struct HostCode {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Statement {
+    Include(String),
     Empty,
     VariableDecl(Declaration),
     Assign(Assignment),
@@ -31,6 +32,11 @@ pub enum Statement {
         operator: Operator,
         value: Expression,
     },
+    MacroCall {
+        name: String,
+        arguments: Vec<Expression>,
+    },
+    MacroDefinition(MacroDefinition),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -73,6 +79,24 @@ pub enum HostStatement {
     },
     EventDestroy {
         event: String,
+    },
+    MacroCall {
+        name: String,
+        arguments: Vec<Expression>,
+    },
+    MacroDefinition(MacroDefinition),
+    FloatDeclaration {
+        name: String,
+        value: f32,
+    },
+    CompoundAssignment {
+        target: String,
+        operator: Operator,
+        value: Expression,
+    },
+    PrintStatement {
+        format: String,
+        arguments: Vec<Expression>,
     },
 }
 
@@ -209,4 +233,17 @@ pub enum Qualifier {
 #[derive(Debug, Clone, PartialEq)]
 pub enum UnaryOperator {
     Negate,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum MacroDefinition {
+    FunctionLike {
+        name: String,
+        parameters: Vec<String>,
+        body: String,
+    },
+    ObjectLike {
+        name: String,
+        value: String,
+    },
 }
