@@ -102,9 +102,9 @@ peg::parser! {
             = name:identifier() _ "<<<" _
               grid:dim3_expr() _ "," _
               block:dim3_expr() _ ">>>" _
-              "(" _ args:comma_list() _ ")" {
+              "(" _ args:argument_list() _ ")" _ ";" {
                 HostStatement::KernelLaunch {
-                    kernel: name,
+                    kernel: name.to_string(),
                     grid_dim: grid,
                     block_dim: block,
                     arguments: args
@@ -153,16 +153,19 @@ peg::parser! {
 
         // Add CUDA_CHECK macro support
         rule cuda_check_macro() -> HostStatement =
-            "CUDA_CHECK" _ "(" _ expr:cuda_check_expr() _ ")" _ ";" {
+            "CUDA_CHECK" _ "(" _ expr:cuda_check_expr()? _ ")" _ ";" {
                 HostStatement::MacroCall {
                     name: "CUDA_CHECK".to_string(),
-                    arguments: vec![expr]
+                    arguments: match expr {
+                        Some(e) => vec![e],
+                        None => vec![]
+                    }
                 }
             }
 
         // Add CUDA Event operations
         rule cuda_event_operation() -> HostStatement
-            = event_create() / event_record() / event_synchronize() / event_elapsed_time() / event_destroy()
+            = event_create() / event_record() / event_synchronize()  / event_destroy()
 
         rule event_create() -> HostStatement
             = "cudaEventCreate" _ "(" _ "&" _ name:identifier() _ ")" {
@@ -179,15 +182,6 @@ peg::parser! {
                 HostStatement::EventSynchronize { event }
             }
 
-        rule event_elapsed_time() -> HostStatement
-            = "cudaEventElapsedTime" _ "(" _ "&" _ var:identifier() _ "," _
-              start:identifier() _ "," _ stop:identifier() _ ")" {
-                HostStatement::EventElapsedTime {
-                    milliseconds: var,
-                    start: start,
-                    end: stop
-                }
-            }
 
         rule event_destroy() -> HostStatement
             = "cudaEventDestroy" _ "(" _ event:identifier() _ ")" {
@@ -198,6 +192,7 @@ peg::parser! {
         pub rule host_statement() -> HostStatement
             = _ s:(
                 cuda_check_macro() /
+                printf_call() /
                 variable_declaration() /
                 assignment() /
                 dim3_declaration() /
@@ -205,7 +200,8 @@ peg::parser! {
                 cuda_memcpy() /
                 cuda_free() /
                 device_synchronize() /
-                cuda_event_operation()
+                cuda_event_operation() /
+                kernel_launch()
             ) _ { s }
 
         // Add sizeof operator
@@ -265,6 +261,7 @@ peg::parser! {
                 args.extend(rest);
                 args
             }
+            / { vec![] }
 
         rule dim3_declaration() -> HostStatement =
             "dim3" _ name:identifier() _ "(" _
@@ -299,15 +296,22 @@ peg::parser! {
             event_create_expr() /
             event_destroy_expr() /
             event_record_expr() /
-            event_synchronize_expr()
+            event_synchronize_expr() /
+            event_elapsed_time_expr()
 
         rule event_create_expr() -> Expression =
-            "cudaEventCreate" _ "(" _ "&" _ name:identifier() _ ")" {
+            "cudaEventCreate" _ "(" _ arg:event_create_arg()? _ ")" {
                 Expression::FunctionCall(
                     "cudaEventCreate".to_string(),
-                    vec![Expression::AddressOf(Box::new(Expression::Variable(name)))]
+                    match arg {
+                        Some(a) => vec![a],
+                        None => vec![]
+                    }
                 )
             }
+
+        rule event_create_arg() -> Expression =
+            "&" _ name:identifier() { Expression::AddressOf(Box::new(Expression::Variable(name))) }
 
         rule event_destroy_expr() -> Expression =
             "cudaEventDestroy" _ "(" _ event:identifier() _ ")" {
@@ -331,6 +335,27 @@ peg::parser! {
                     "cudaEventSynchronize".to_string(),
                     vec![Expression::Variable(event)]
                 )
+            }
+
+        rule event_elapsed_time_expr() -> Expression =
+            "cudaEventElapsedTime" _ "(" _ "&" _ ms:identifier() _ "," _
+            start:identifier() _ "," _ stop:identifier() _ ")" {
+                Expression::FunctionCall(
+                    "cudaEventElapsedTime".to_string(),
+                    vec![
+                        Expression::AddressOf(Box::new(Expression::Variable(ms))),
+                        Expression::Variable(start),
+                        Expression::Variable(stop)
+                    ]
+                )
+            }
+
+        rule printf_call() -> HostStatement =
+            "printf" _ "(" _ format_string:string_literal() rest:(_ "," _ e:expression() { e })* _ ")" _ ";" {
+                HostStatement::Printf {
+                    format: format_string,
+                    arguments: rest
+                }
             }
     }
 }

@@ -13,7 +13,17 @@ mod tests {
         dim3 block_size(1024);
         dim3 grid_size(CEIL_DIV(M, block_size.x));
         cudaEvent_t start, stop;
-        CUDA_CHECK();
+        CUDA_CHECK(cudaEventCreate(&start));
+        CUDA_CHECK(cudaEventCreate(&stop));
+        float ms = 0.f;
+        CUDA_CHECK(cudaEventRecord(start));
+        softmax_kernel_0<<<grid_size, block_size>>>(matd, resd, M, N);
+        CUDA_CHECK(cudaEventRecord(stop));
+        CUDA_CHECK(cudaEventSynchronize(stop));
+        CUDA_CHECK(cudaEventElapsedTime(&ms, start, stop));
+        printf(">> Kernel execution time: %f ms\n", ms);
+        CUDA_CHECK(cudaEventDestroy(start));
+        CUDA_CHECK(cudaEventDestroy(stop));
     "#;
         let result = host_parser::host_program(input);
         if let Err(e) = &result {
