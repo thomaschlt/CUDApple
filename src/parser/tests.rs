@@ -480,4 +480,46 @@ mod tests {
         let program = result.unwrap();
         println!("\nAST Structure:\n{:?}", program);
     }
+
+    #[test]
+    fn test_complete_cuda_program() {
+        let input = r#"
+        // Host code
+        int n = 1024;
+        float *d_a;
+        dim3 block_size(1024);
+        
+        // Kernel definition
+        __global__ void simple_kernel(float *arr, int n) {
+            int idx = blockIdx.x * blockDim.x + threadIdx.x;
+            if (idx < n) {
+                arr[idx] = arr[idx] * 2.0f;
+            }
+        }
+        
+        // More host code
+        cudaMalloc(&d_a, n * sizeof(float));
+        simple_kernel<<<grid_size, block_size>>>(d_a, n);
+        cudaDeviceSynchronize();
+        "#;
+
+        let result = parse_cuda(input);
+        assert!(
+            result.is_ok(),
+            "Failed to parse complete CUDA program: {:?}",
+            result
+        );
+
+        let program = result.unwrap();
+        assert!(
+            !program.host_code.statements.is_empty(),
+            "No host statements parsed"
+        );
+        assert!(!program.device_code.is_empty(), "No device code parsed");
+
+        // Verify kernel was parsed
+        assert_eq!(program.device_code[0].name, "simple_kernel");
+
+        println!("\nParsed AST Structure:\n{:#?}", program);
+    }
 }
