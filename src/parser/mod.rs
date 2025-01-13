@@ -80,43 +80,80 @@ fn split_cuda_source(source: &str) -> (Vec<String>, Vec<String>) {
 use crate::parser::unified_ast::ParserError;
 use anyhow::Context;
 
-pub fn parse_cuda(source: &str) -> Result<CudaProgram, ParserError> {
-    println!("Input source:\n{}", source);
+fn identify_code_blocks(source: &str) -> Result<Vec<CodeBlock>, ParserError> {
     let (host_parts, device_parts) = split_cuda_source(source);
+    let mut blocks = Vec::new();
 
-    println!("Device parts after split:");
-    for (i, part) in device_parts.iter().enumerate() {
-        println!("Part {}: {}", i, part);
+    // Add host blocks
+    for (i, content) in host_parts.iter().enumerate() {
+        blocks.push(CodeBlock {
+            kind: BlockKind::Host,
+            content: content.clone(),
+            location: Location {
+                start_line: i, // Simplified line tracking
+                end_line: i,
+            },
+        });
     }
 
-    // Parse device code
-    let mut device_code = Vec::new();
-    for part in device_parts {
-        let kernel_source = format!("__global__{}", part);
-        println!("Attempting to parse kernel:\n{}", kernel_source);
-
-        let kernel = cuda_parser::kernel_function(&kernel_source).map_err(|e| {
-            println!("Parser error: {}", e);
-            ParserError::DeviceCodeError(e.to_string())
-        })?;
-        device_code.push(kernel);
+    // Add device blocks
+    for (i, content) in device_parts.iter().enumerate() {
+        blocks.push(CodeBlock {
+            kind: BlockKind::Device,
+            content: format!("__global__{}", content),
+            location: Location {
+                start_line: i, // Simplified line tracking
+                end_line: i,
+            },
+        });
     }
 
-    // Parse host code
-    let mut host_statements = Vec::new();
-    for part in host_parts {
-        if !part.trim().is_empty() {
-            match host_parser::host_program(&part) {
-                Ok(host_code) => host_statements.extend(host_code.statements),
-                Err(e) => println!("Warning: Failed to parse host code part: {}", e),
+    Ok(blocks)
+}
+
+pub fn parse_cuda(source: &str) -> Result<CudaProgram, ParserError> {
+    // Phase 1: Initial parse to identify all code blocks
+    let code_blocks = identify_code_blocks(source)?;
+
+    // Phase 2: Parse each block with appropriate parser
+    let mut program = CudaProgram {
+        host_code: HostCode {
+            statements: Vec::new(),
+        },
+        device_code: Vec::new(),
+    };
+
+    for block in code_blocks {
+        match block.kind {
+            BlockKind::Host => {
+                let host_ast = host_parser::host_program(&block.content)?;
+                program.host_code.statements.extend(host_ast.statements);
+            }
+            BlockKind::Device => {
+                let kernel = cuda_parser::kernel_function(&block.content)?;
+                program.device_code.push(kernel);
             }
         }
     }
 
-    Ok(CudaProgram {
-        device_code,
-        host_code: HostCode {
-            statements: host_statements,
-        },
-    })
+    Ok(program)
+}
+
+#[derive(Debug)]
+pub struct CodeBlock {
+    pub kind: BlockKind,
+    pub content: String,
+    pub location: Location,
+}
+
+#[derive(Debug)]
+pub enum BlockKind {
+    Host,
+    Device,
+}
+
+#[derive(Debug)]
+pub struct Location {
+    pub start_line: usize,
+    pub end_line: usize,
 }
