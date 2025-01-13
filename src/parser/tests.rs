@@ -522,4 +522,27 @@ mod tests {
 
         println!("\nParsed AST Structure:\n{:#?}", program);
     }
+
+    #[test]
+    fn test_complete_cuda_program_with_host_function() {
+        let input = r#"
+        // Host code
+        void host_function() {
+            // Function body
+        }
+        "#;
+        let result = parse_cuda(input);
+        assert!(
+            result.is_ok(),
+            "Failed to parse complete CUDA program: {:?}",
+            result
+        );
+        let program = result.unwrap();
+        assert!(
+            !program.host_code.statements.is_empty(),
+            "No host statements parsed"
+        );
+        assert!(!program.device_code.is_empty(), "No device code parsed");
+        println!("\nParsed AST Structure:\n{:#?}", program);
+    }
 }

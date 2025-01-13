@@ -152,4 +152,13 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn test_host_function_declaration() {
+        let input = "void host_function() { }";
+        let result = host_parser::host_program(input);
+        assert!(result.is_ok(), "Failed to parse: {}", input);
+        println!("\nInput: {}", input);
+        println!("AST Structure:\n{:#?}", result.as_ref().unwrap());
+    }
 }
