@@ -255,6 +255,12 @@ impl fmt::Display for ParserError {
     }
 }
 
+impl From<peg::error::ParseError<peg::str::LineCol>> for ParserError {
+    fn from(err: peg::error::ParseError<peg::str::LineCol>) -> Self {
+        ParserError::HostCodeError(err.to_string())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Qualifier {
     Restrict,
