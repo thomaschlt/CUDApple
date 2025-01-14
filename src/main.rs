@@ -104,7 +104,9 @@ fn main() -> Result<()> {
 
     // Generate Metal shader
     let mut metal_shader = metal::MetalShader::new();
-    metal_shader.generate(&cuda_program)?;
+    metal_shader
+        .generate(&cuda_program)
+        .map_err(|e| anyhow::anyhow!("Failed to generate Metal shader: {}", e))?;
 
     // Write Metal shader to output file
     let shader_path = args.output.join("kernel.metal");
@@ -118,12 +120,6 @@ fn main() -> Result<()> {
         threadgroup_size: (256, 1, 1), // Common threadgroup size for 1D
         buffer_sizes: std::collections::HashMap::new(),
     };
-
-    let host_code = metal_shader.generate_host_code(config);
-    let host_path = args.output.join("KernelRunner.swift");
-    fs::write(&host_path, host_code).context("Failed to write Metal host code")?;
-
-    log::info!("Generated Metal host code: {:?}", host_path);
 
     Ok(())
 }
