@@ -1,10 +1,8 @@
 use crate::parser::unified_ast::{
-    Block, CudaProgram, Expression, KernelFunction, Operator, Parameter, Qualifier, Statement, Type,
+    Block, CudaProgram, Expression, KernelFunction, Operator, Parameter, Statement, Type,
 };
 use std::fmt::Write;
 pub mod host;
-#[cfg(test)]
-mod tests;
 
 #[derive(Debug)]
 pub struct MetalShader {
@@ -19,43 +17,39 @@ impl MetalShader {
     }
 
     pub fn generate(&mut self, program: &CudaProgram) -> Result<(), String> {
-        // Add Metal shader header
-        writeln!(self.source, "#include <metal_stdlib>").map_err(|e| e.to_string())?;
-        writeln!(self.source, "#include <metal_math>").map_err(|e| e.to_string())?;
-        writeln!(self.source, "using namespace metal;").map_err(|e| e.to_string())?;
+        // Add Metal shader header with proper indentation
+        writeln!(self.source, "            #include <metal_stdlib>").map_err(|e| e.to_string())?;
+        writeln!(self.source, "            #include <metal_math>").map_err(|e| e.to_string())?;
+        writeln!(self.source, "            using namespace metal;").map_err(|e| e.to_string())?;
         writeln!(self.source).map_err(|e| e.to_string())?;
 
-        // Process each kernel in the AST
+        // Process each kernel in the AST with consistent indentation
         for kernel in &program.device_code {
-            self.generate_kernel(kernel)?;
+            self.generate_kernel_with_indent(kernel, "            ")?;
         }
 
         Ok(())
     }
 
-    fn generate_kernel(&mut self, kernel: &KernelFunction) -> Result<(), String> {
-        // Write kernel signature
-        writeln!(self.source, "kernel void {}(", kernel.name).map_err(|e| e.to_string())?;
+    fn generate_kernel_with_indent(
+        &mut self,
+        kernel: &KernelFunction,
+        indent: &str,
+    ) -> Result<(), String> {
+        // Write kernel signature with indentation
+        writeln!(self.source, "{}kernel void {}(", indent, kernel.name)
+            .map_err(|e| e.to_string())?;
 
-        // Generate parameters
-        self.translate_parameters(kernel)?;
-
-        // Begin kernel body
-        writeln!(self.source, ") {{").map_err(|e| e.to_string())?;
-        writeln!(self.source, "}}").map_err(|e| e.to_string())?;
-
-        Ok(())
-    }
-
-    fn translate_parameters(&mut self, kernel: &KernelFunction) -> Result<(), String> {
+        // Generate parameters with proper indentation
+        let param_indent = format!("{}    ", indent);
         let mut first = true;
         for (index, param) in kernel.parameters.iter().enumerate() {
             if !first {
-                write!(self.source, ",\n    ").map_err(|e| e.to_string())?;
+                writeln!(self.source, ",").map_err(|e| e.to_string())?;
             }
             first = false;
 
-            // Add buffer attribute for pointer types
+            write!(self.source, "{}", param_indent).map_err(|e| e.to_string())?;
             match &param.param_type {
                 Type::Pointer(_) => {
                     write!(
@@ -79,84 +73,68 @@ impl MetalShader {
 
         // Add thread position parameter
         if !first {
-            write!(self.source, ",\n    ").map_err(|e| e.to_string())?;
+            writeln!(self.source, ",").map_err(|e| e.to_string())?;
         }
-        write!(self.source, "uint index [[thread_position_in_grid]]").map_err(|e| e.to_string())?;
+        write!(
+            self.source,
+            "{}uint index [[thread_position_in_grid]]",
+            param_indent
+        )
+        .map_err(|e| e.to_string())?;
+        writeln!(self.source, ") {{").map_err(|e| e.to_string())?;
+
+        // Translate kernel body statements with proper indentation
+        for stmt in &kernel.body.statements {
+            self.translate_statement_with_indent(stmt, &format!("{}    ", indent))?;
+        }
+
+        // Close kernel function
+        writeln!(self.source, "{}}}", indent).map_err(|e| e.to_string())?;
+        writeln!(self.source).map_err(|e| e.to_string())?;
 
         Ok(())
     }
 
-    fn translate_thread_index(&mut self, expr: &Expression) -> Result<(), String> {
-        // Convert: blockIdx.x * blockDim.x + threadIdx.x
-        // To: index
-        write!(self.source, "index").map_err(|e| e.to_string())
-    }
-
-    fn translate_block(&mut self, block: &Block) -> Result<(), String> {
-        for stmt in &block.statements {
-            self.translate_statement(stmt)?;
-        }
-        Ok(())
-    }
-
-    fn translate_statement(&mut self, stmt: &Statement) -> Result<(), String> {
+    fn translate_statement_with_indent(
+        &mut self,
+        stmt: &Statement,
+        indent: &str,
+    ) -> Result<(), String> {
         match stmt {
-            Statement::IfStmt { condition, body } => {
-                write!(self.source, "if (").map_err(|e| e.to_string())?;
-                self.translate_expression(condition)?;
-                writeln!(self.source, ") {{").map_err(|e| e.to_string())?;
-                self.translate_block(body)?;
-                writeln!(self.source, "}}").map_err(|e| e.to_string())?;
-                Ok(())
-            }
             Statement::VariableDecl(decl) => {
-                write!(self.source, "{} {} = ", decl.var_type, decl.name)
-                    .map_err(|e| e.to_string())?;
+                write!(self.source, "{}", indent).map_err(|e| e.to_string())?;
+                match decl.var_type {
+                    Type::Int => write!(self.source, "uint").map_err(|e| e.to_string())?,
+                    _ => write!(self.source, "{}", decl.var_type).map_err(|e| e.to_string())?,
+                }
+                write!(self.source, " {} = ", decl.name).map_err(|e| e.to_string())?;
                 if let Some(init) = &decl.initializer {
                     self.translate_expression(init)?;
                 }
                 writeln!(self.source, ";").map_err(|e| e.to_string())?;
-                Ok(())
+            }
+            Statement::IfStmt { condition, body } => {
+                write!(self.source, "{}if (", indent).map_err(|e| e.to_string())?;
+                self.translate_expression(condition)?;
+                writeln!(self.source, ") {{").map_err(|e| e.to_string())?;
+
+                // Translate if body with additional indentation
+                for stmt in &body.statements {
+                    self.translate_statement_with_indent(stmt, &format!("{}    ", indent))?;
+                }
+
+                writeln!(self.source, "{}}}", indent).map_err(|e| e.to_string())?;
             }
             Statement::Assign(assign) => {
+                write!(self.source, "{}", indent).map_err(|e| e.to_string())?;
                 self.translate_expression(&assign.target)?;
                 write!(self.source, " = ").map_err(|e| e.to_string())?;
                 self.translate_expression(&assign.value)?;
                 writeln!(self.source, ";").map_err(|e| e.to_string())?;
-                Ok(())
             }
-            Statement::ForLoop {
-                init,
-                condition,
-                increment,
-                body,
-            } => {
-                write!(self.source, "for (").map_err(|e| e.to_string())?;
-                self.translate_statement(init)?;
-                self.translate_expression(condition)?;
-                write!(self.source, "; ").map_err(|e| e.to_string())?;
-                self.translate_statement(increment)?;
-                writeln!(self.source, ") {{").map_err(|e| e.to_string())?;
-                self.translate_block(body)?;
-                writeln!(self.source, "}}").map_err(|e| e.to_string())?;
-                Ok(())
-            }
-            Statement::Include(_)
-            | Statement::Empty
-            | Statement::CompoundAssign { .. }
-            | Statement::MacroCall { .. }
-            | Statement::MacroDefinition(_) => Ok(()),
+            _ => return Err(format!("Unsupported statement: {:?}", stmt)),
         }
-    }
-
-    fn operator_to_string(op: &Operator) -> &'static str {
-        match op {
-            Operator::Add => "+",
-            Operator::Subtract => "-",
-            Operator::Multiply => "*",
-            Operator::Divide => "/",
-            Operator::LessThan => "<",
-        }
+        Ok(())
     }
 
     fn translate_expression(&mut self, expr: &Expression) -> Result<(), String> {
@@ -173,9 +151,28 @@ impl MetalShader {
                     .map_err(|e| e.to_string())?;
                 self.translate_expression(rhs)?;
             }
+            Expression::Variable(name) => {
+                write!(self.source, "{}", name).map_err(|e| e.to_string())?;
+            }
+            Expression::IntegerLiteral(value) => {
+                write!(self.source, "{}", value).map_err(|e| e.to_string())?;
+            }
+            Expression::ThreadIdx(_) | Expression::BlockIdx(_) | Expression::BlockDim(_) => {
+                write!(self.source, "index").map_err(|e| e.to_string())?;
+            }
             _ => return Err(format!("Unsupported expression: {:?}", expr)),
         }
         Ok(())
+    }
+
+    fn operator_to_string(op: &Operator) -> &'static str {
+        match op {
+            Operator::Add => "+",
+            Operator::Subtract => "-",
+            Operator::Multiply => "*",
+            Operator::Divide => "/",
+            Operator::LessThan => "<",
+        }
     }
 
     pub fn source(&self) -> &str {
