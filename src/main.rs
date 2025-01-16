@@ -15,7 +15,7 @@ struct Args {
     input: PathBuf,
 
     // output directory for generated Metal code
-    #[arg(short, long)]
+    #[arg(short = 'd', long)]
     output: PathBuf,
 
     // optimization level (0-3)
@@ -25,6 +25,10 @@ struct Args {
     // verbose mode (-v, -vv, -vvv)
     #[arg(short, long, action = ArgAction::Count)]
     verbose: u8,
+
+    // run the kernel after generation
+    #[arg(short, long)]
+    run: bool,
 }
 
 fn validate_input(path: &PathBuf) -> Result<()> {
@@ -87,19 +91,13 @@ fn main() -> Result<()> {
     let cuda_program = parser::parse_cuda(&cuda_source).context("Failed to parse CUDA program")?;
 
     log::debug!(
-        "Successfully parsed CUDA program with {} kernels and {} host statements",
+        "Successfully parsed CUDA program with {} kernels",
         cuda_program.device_code.len(),
-        cuda_program.host_code.statements.len()
     );
 
     // Log kernels
     for kernel in &cuda_program.device_code {
         log::info!("Found kernel: {}", kernel.name);
-    }
-
-    // Log host statements
-    for stmt in &cuda_program.host_code.statements {
-        log::debug!("Found host statement: {:?}", stmt);
     }
 
     // Generate Metal shader
@@ -108,18 +106,75 @@ fn main() -> Result<()> {
         .generate(&cuda_program)
         .map_err(|e| anyhow::anyhow!("Failed to generate Metal shader: {}", e))?;
 
-    // Write Metal shader to output file
+    // Write Metal shader
     let shader_path = args.output.join("kernel.metal");
     fs::write(&shader_path, metal_shader.source()).context("Failed to write Metal shader")?;
 
     log::info!("Generated Metal shader: {:?}", shader_path);
 
-    // Generate and write host code
+    // Generate Swift host code from template
     let config = metal::host::MetalKernelConfig {
-        grid_size: (1, 1, 1),          // Default values for now
-        threadgroup_size: (256, 1, 1), // Common threadgroup size for 1D
-        buffer_sizes: std::collections::HashMap::new(),
+        grid_size: (1, 1, 1),
+        threadgroup_size: (256, 1, 1),
     };
+
+    let host_generator =
+        metal::host::MetalHostGenerator::new(config, metal_shader.source().to_string());
+    let (swift_runner_code, swift_main_code) = host_generator.generate_swift_code();
+
+    // Write Swift host code
+    let host_path = args.output.join("MetalKernelRunner.swift");
+    fs::write(&host_path, swift_runner_code).context("Failed to write Swift host code")?;
+
+    let main_path = args.output.join("main.swift");
+    fs::write(&main_path, swift_main_code).context("Failed to write Swift main code")?;
+
+    log::info!("Generated Swift files: {:?}, {:?}", host_path, main_path);
+
+    // If --run flag is present, compile and execute the kernel
+    if args.run {
+        // Run the Swift program
+        let run_result = std::process::Command::new("xcrun")
+            .current_dir(&args.output)
+            .args([
+                "-sdk",
+                "macosx",
+                "swiftc",
+                "MetalKernelRunner.swift",
+                "main.swift",
+                "-o",
+                "kernel_runner",
+            ])
+            .output()
+            .context("Failed to compile Swift code")?;
+
+        if !run_result.status.success() {
+            println!(
+                "Swift compilation error: {}",
+                String::from_utf8_lossy(&run_result.stderr)
+            );
+            anyhow::bail!("Swift compilation failed");
+        }
+
+        // Execute the compiled program
+        let execute_result = std::process::Command::new("./kernel_runner")
+            .current_dir(&args.output)
+            .output()
+            .context("Failed to run Metal kernel")?;
+
+        if !execute_result.status.success() {
+            println!(
+                "Execution error: {}",
+                String::from_utf8_lossy(&execute_result.stderr)
+            );
+            anyhow::bail!("Kernel execution failed");
+        }
+
+        println!(
+            "Kernel execution output:\n{}",
+            String::from_utf8_lossy(&execute_result.stdout)
+        );
+    }
 
     Ok(())
 }
