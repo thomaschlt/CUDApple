@@ -113,8 +113,8 @@ fn main() -> Result<()> {
     log::info!("Generated Metal shader: {:?}", shader_path);
 
     // Generate Swift host code from template
-    let config = metal::host::MetalKernelConfig {
-        grid_size: (1, 1, 1),
+    let config: metal::host::MetalKernelConfig = metal::host::MetalKernelConfig {
+        grid_size: (4096, 1, 1),
         threadgroup_size: (256, 1, 1),
     };
 
