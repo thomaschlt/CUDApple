@@ -8,28 +8,77 @@ class MetalKernelRunner {
     private var buffers: [String: MTLBuffer] = [:]
 
     init() throws {
-        print("Attempting to create Metal device...")
+        print("\n=== Starting Metal Device Detection ===")
         
-        // Synchronously initialize Metal
-        let semaphore = DispatchSemaphore(value: 0)
-        var initDevice: MTLDevice?
-        var initError: Error?
-        
-        DispatchQueue.main.async {
-            if let device = MTLCreateSystemDefaultDevice() {
-                initDevice = device
-            }
-            semaphore.signal()
+        // Check if Metal framework is available
+        print("Checking Metal framework...")
+        let metalFrameworkPath = "/System/Library/Frameworks/Metal.framework"
+        if FileManager.default.fileExists(atPath: metalFrameworkPath) {
+            print("✓ Metal framework found at: \(metalFrameworkPath)")
+        } else {
+            print("⚠️ Metal framework not found!")
+            throw MetalError.deviceNotFound
         }
         
-        _ = semaphore.wait(timeout: .now() + 2.0)
+        // Try to get devices
+        print("\nAttempting to get Metal devices...")
+        let devices = MTLCopyAllDevices()
+        print("Number of devices found: \(devices.count)")
         
-        guard let device = initDevice else {
+        if devices.isEmpty {
+            print("⚠️ No Metal devices found!")
+            throw MetalError.deviceNotFound
+        }
+        
+        // Print device information
+        for (index, device) in devices.enumerated() {
+            print("\nDevice \(index) Details:")
+            print("Name: \(device.name)")
+            print("Headless: \(device.isHeadless)")
+            print("Low Power: \(device.isLowPower)")
+        }
+        
+        // Try different methods to get a working device
+        print("\nTrying different methods to get a working device...")
+        
+        var selectedDevice: MTLDevice?
+        
+        // Method 1: Try system default device
+        print("\nMethod 1: Trying MTLCreateSystemDefaultDevice()...")
+        if let defaultDevice = MTLCreateSystemDefaultDevice() {
+            print("✓ Successfully created default device: \(defaultDevice.name)")
+            selectedDevice = defaultDevice
+        } else {
+            print("⚠️ MTLCreateSystemDefaultDevice() failed")
+        }
+        
+        // Method 2: Try to find M1/M2 device
+        if selectedDevice == nil {
+            print("\nMethod 2: Looking for Apple Silicon device...")
+            if let appleDevice = devices.first(where: { $0.name.contains("Apple") }) {
+                print("✓ Found Apple Silicon device: \(appleDevice.name)")
+                selectedDevice = appleDevice
+            } else {
+                print("⚠️ No Apple Silicon device found")
+            }
+        }
+        
+        // Method 3: Use first available device
+        if selectedDevice == nil {
+            print("\nMethod 3: Using first available device...")
+            if let firstDevice = devices.first {
+                print("✓ Using first available device: \(firstDevice.name)")
+                selectedDevice = firstDevice
+            }
+        }
+        
+        guard let device = selectedDevice else {
+            print("\n⚠️ All methods failed to create a Metal device!")
             throw MetalError.deviceNotFound
         }
         
         self.device = device
-        print("Successfully created Metal device: \(device.name)")
+        print("\nSuccessfully initialized Metal device: \(device.name)")
         
         // Create command queue with debug info
         guard let commandQueue = device.makeCommandQueue() else {
@@ -49,11 +98,10 @@ class MetalKernelRunner {
                     device float* a [[buffer(0)]],
                     device float* b [[buffer(1)]],
                     device float* c [[buffer(2)]],
-                    uint n,
-                    uint index [[thread_position_in_grid]]) {
-                    uint i = index;
-                    if (i < n) {
-                        c[i] = a[i] + b[i];
+                    device uint32_t* n [[buffer(3)]],
+                    uint32_t index [[thread_position_in_grid]]) {
+                    if (index < *n) {
+                        c[index] = a[index] + b[index];
                     }
                 }
                 """, options: nil)
@@ -78,7 +126,7 @@ class MetalKernelRunner {
         return buffer
     }
     
-    func run(inputs: [MTLBuffer]) throws {
+    func run(inputs: [MTLBuffer], problemSize: Int) throws {
         guard let commandBuffer = commandQueue.makeCommandBuffer(),
               let computeEncoder = commandBuffer.makeComputeCommandEncoder() else {
             throw MetalError.encoderCreationFailed
@@ -91,18 +139,14 @@ class MetalKernelRunner {
             computeEncoder.setBuffer(buffer, offset: 0, index: index)
         }
         
-        // Configure grid and threadgroup sizes
-        let gridSize = MTLSize(width: {{GRID_SIZE}}.0,
-                             height: {{GRID_SIZE}}.1,
-                             depth: {{GRID_SIZE}}.2)
         
-        let threadgroupSize = MTLSize(width: {{THREADGROUP_SIZE}}.0,
-                                    height: {{THREADGROUP_SIZE}}.1,
-                                    depth: {{THREADGROUP_SIZE}}.2)
+        // Calculate grid and threadgroup sizes dynamically
+        let config = KernelConfig.calculate(problemSize: problemSize)
         
-        computeEncoder.dispatchThreads(gridSize, threadsPerThreadgroup: threadgroupSize)
+        computeEncoder.dispatchThreads(config.gridSize, 
+                                     threadsPerThreadgroup: config.threadGroupSize)
+        
         computeEncoder.endEncoding()
-        
         commandBuffer.commit()
         commandBuffer.waitUntilCompleted()
     }
@@ -115,12 +159,13 @@ class MetalKernelRunner {
         guard let bufferA = self.allocateBuffer(a, index: 0),
             let bufferB = self.allocateBuffer(b, index: 1),
             let bufferC = self.device.makeBuffer(length: n * MemoryLayout<Float>.stride, 
-                                            options: .storageModeShared) else {
+                                            options: .storageModeShared),
+            let bufferN = self.allocateBuffer([UInt32(n)], index: 3) else {
             throw MetalError.bufferAllocationFailed
         }
         
         // Run kernel
-        try self.run(inputs: [bufferA, bufferB, bufferC])
+        try self.run(inputs: [bufferA, bufferB, bufferC, bufferN], problemSize: n)
         
         // Read result
         let result = UnsafeBufferPointer<Float>(start: bufferC.contents().assumingMemoryBound(to: Float.self),

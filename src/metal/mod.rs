@@ -60,7 +60,7 @@ impl MetalShader {
                     .map_err(|e| e.to_string())?;
                 }
                 Type::Int => {
-                    write!(self.source, "uint {}", param.name).map_err(|e| e.to_string())?;
+                    write!(self.source, "uint32_t {}", param.name).map_err(|e| e.to_string())?;
                 }
                 _ => {
                     return Err(format!(
@@ -77,7 +77,7 @@ impl MetalShader {
         }
         write!(
             self.source,
-            "{}uint index [[thread_position_in_grid]]",
+            "{}uint32_t index [[thread_position_in_grid]]",
             param_indent
         )
         .map_err(|e| e.to_string())?;
@@ -104,7 +104,7 @@ impl MetalShader {
             Statement::VariableDecl(decl) => {
                 write!(self.source, "{}", indent).map_err(|e| e.to_string())?;
                 match decl.var_type {
-                    Type::Int => write!(self.source, "uint").map_err(|e| e.to_string())?,
+                    Type::Int => write!(self.source, "uint32_t").map_err(|e| e.to_string())?,
                     _ => write!(self.source, "{}", decl.var_type).map_err(|e| e.to_string())?,
                 }
                 write!(self.source, " {} = ", decl.name).map_err(|e| e.to_string())?;
