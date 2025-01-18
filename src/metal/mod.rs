@@ -160,9 +160,37 @@ impl MetalShader {
             Expression::IntegerLiteral(value) => {
                 write!(self.source, "{}", value).map_err(|e| e.to_string())?;
             }
+            Expression::FloatLiteral(value) => {
+                if value.fract() == 0.0 {
+                    write!(self.source, "{}.0f", value).map_err(|e| e.to_string())?;
+                } else {
+                    write!(self.source, "{}f", value).map_err(|e| e.to_string())?;
+                }
+            }
             Expression::ThreadIdx(_) | Expression::BlockIdx(_) | Expression::BlockDim(_) => {
                 write!(self.source, "index").map_err(|e| e.to_string())?;
-            } // _ => return Err(format!("Unsupported expression: {:?}", expr)),
+            }
+            Expression::MathFunction { name, arguments } => match name.as_str() {
+                "max" => {
+                    write!(self.source, "max(").map_err(|e| e.to_string())?;
+                    self.translate_expression(&arguments[0])?;
+                    write!(self.source, ", ").map_err(|e| e.to_string())?;
+                    self.translate_expression(&arguments[1])?;
+                    write!(self.source, ")").map_err(|e| e.to_string())?;
+                }
+                "expf" => {
+                    write!(self.source, "expf(").map_err(|e| e.to_string())?;
+                    self.translate_expression(&arguments[0])?;
+                    write!(self.source, ")").map_err(|e| e.to_string())?;
+                }
+                _ => return Err(format!("Unsupported math function: {:?}", name)),
+            },
+            Expression::Infinity => {
+                write!(self.source, "as_type<float>(0x7F800000)").map_err(|e| e.to_string())?;
+            }
+            Expression::NegativeInfinity => {
+                write!(self.source, "-as_type<float>(0x7F800000)").map_err(|e| e.to_string())?;
+            }
         }
         Ok(())
     }

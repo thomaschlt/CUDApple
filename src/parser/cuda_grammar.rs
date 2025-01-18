@@ -118,6 +118,23 @@ peg::parser! {
         rule variable() -> Expression
             = name:identifier() { Expression::Variable(name) }
 
+        rule math_function() -> Expression
+            = "max" _ "(" _ x:expression() _ "," _ y:expression() _ ")" {
+                Expression::MathFunction {
+                    name: "max".to_string(),
+                    arguments: vec![x, y],
+                }
+            }
+            / "expf" _ "(" _ x:expression() _ ")" {
+                Expression::MathFunction { name: "expf".to_string(), arguments: vec![x], }
+            }
+
+        rule infinity() -> Expression
+            = "INFINITY" { Expression::Infinity }
+            / "-INFINITY" { Expression::NegativeInfinity }
+            / "-" _ n:number() _ "*" _ "INFINITY" { Expression::NegativeInfinity }
+            / n:number() _ "*" _ "-" _ "INFINITY" { Expression::NegativeInfinity }
+
         rule expression() -> Expression = precedence! {
             x:(@) _ "<" _ y:@ { Expression::BinaryOp(Box::new(x), Operator::LessThan, Box::new(y)) }
             --
@@ -127,16 +144,26 @@ peg::parser! {
             x:(@) _ "*" _ y:@ { Expression::BinaryOp(Box::new(x), Operator::Multiply, Box::new(y)) }
             x:(@) _ "/" _ y:@ { Expression::BinaryOp(Box::new(x), Operator::Divide, Box::new(y)) }
             --
-            n:number() { Expression::IntegerLiteral(n) }
+            n:number() { n }
+            i:infinity() { i }
             t:thread_index() { t }
+            m:math_function() { m }
             a:array_access() { a }
             v:variable() { v }
             "(" _ e:expression() _ ")" { e }
         }
 
-        rule number() -> i64
-            = n:$(['0'..='9']+) {
-                n.parse().unwrap()
+        rule number() -> Expression
+            = n:$(['0'..='9']+ "." ['0'..='9']* "f"?) {
+                let n = n.trim_end_matches('f');
+                Expression::FloatLiteral(n.parse::<f32>().unwrap())
+            }
+            / n:$(['0'..='9']+ "f") {
+                let n = n.trim_end_matches('f');
+                Expression::FloatLiteral(n.parse::<f32>().unwrap())
+            }
+            / n:$(['0'..='9']+) {
+                Expression::IntegerLiteral(n.parse().unwrap())
             }
 
         rule thread_index() -> Expression

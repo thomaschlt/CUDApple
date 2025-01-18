@@ -48,6 +48,9 @@ pub struct Assignment {
 pub enum Expression {
     Variable(String),
     IntegerLiteral(i64),
+    FloatLiteral(f32),
+    Infinity,
+    NegativeInfinity,
     BinaryOp(Box<Expression>, Operator, Box<Expression>),
     ThreadIdx(Dimension),
     BlockIdx(Dimension),
@@ -55,6 +58,10 @@ pub enum Expression {
     ArrayAccess {
         array: Box<Expression>,
         index: Box<Expression>,
+    },
+    MathFunction {
+        name: String,
+        arguments: Vec<Expression>,
     },
 }
 

@@ -450,4 +450,61 @@ mod tests {
         let program = result.unwrap();
         println!("\nAST Structure:\n{:?}", program);
     }
+
+    #[test]
+    fn test_max_function() {
+        let input = r#"__global__ void max_test(float *a){
+            float x = 1.0f;
+            float y = 2.0f;
+            float z = max(x, y);
+        }"#;
+        let result = parse_cuda(input);
+        assert!(result.is_ok(), "Parsing failed: {:?}", result);
+        let program = result.unwrap();
+        println!("\nAST Structure:\n{:?}", program);
+    }
+
+    #[test]
+    fn test_expf_function() {
+        let input = r#"__global__ void exp_test() {
+            float x = expf(1.0f);
+        }"#;
+        let result = parse_cuda(input);
+        assert!(result.is_ok(), "Parsing failed: {:?}", result);
+        let program = result.unwrap();
+        println!("\nAST Structure:\n{:?}", program);
+    }
+
+    #[test]
+    fn test_infinity_constant() {
+        let input = r#"__global__ void infinity_test() {
+            float x = INFINITY;
+            float y = -1.0f * INFINITY;
+            float z = -INFINITY;
+            float w = 1.0f * INFINITY;
+        }"#;
+        let result = parse_cuda(input);
+        assert!(result.is_ok(), "Parsing failed: {:?}", result);
+        let program = result.unwrap();
+        let statements = &program.device_code[0].body.statements;
+        assert_eq!(statements.len(), 4);
+
+        // Verify the expressions
+        if let Statement::VariableDecl(decl) = &statements[0] {
+            match &decl.initializer {
+                Some(Expression::Infinity) => assert!(true),
+                _ => panic!("Expected Infinity expression"),
+            }
+        }
+
+        // Both forms of negative infinity should parse to NegativeInfinity
+        if let Statement::VariableDecl(decl) = &statements[1] {
+            match &decl.initializer {
+                Some(Expression::NegativeInfinity) => assert!(true),
+                _ => panic!("Expected NegativeInfinity expression"),
+            }
+        }
+
+        println!("\nParsed AST:\n{:#?}", program);
+    }
 }
