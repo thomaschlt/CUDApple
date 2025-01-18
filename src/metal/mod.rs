@@ -1,5 +1,5 @@
 use crate::parser::unified_ast::{
-    Block, CudaProgram, Expression, KernelFunction, Operator, Parameter, Statement, Type,
+    CudaProgram, Expression, KernelFunction, Operator, Statement, Type,
 };
 use std::fmt::Write;
 pub mod host;
@@ -17,17 +17,15 @@ impl MetalShader {
     }
 
     pub fn generate(&mut self, program: &CudaProgram) -> Result<(), String> {
-        // Add Metal shader header with proper indentation
+        // Generate Metal shader header with proper indentation
         writeln!(self.source, "            #include <metal_stdlib>").map_err(|e| e.to_string())?;
         writeln!(self.source, "            #include <metal_math>").map_err(|e| e.to_string())?;
-        writeln!(self.source, "            using namespace metal;").map_err(|e| e.to_string())?;
-        writeln!(self.source).map_err(|e| e.to_string())?;
+        writeln!(self.source, "            using namespace metal;\n").map_err(|e| e.to_string())?;
 
-        // Process each kernel in the AST with consistent indentation
+        // Generate each kernel function
         for kernel in &program.device_code {
             self.generate_kernel_with_indent(kernel, "            ")?;
         }
-
         Ok(())
     }
 
@@ -60,7 +58,12 @@ impl MetalShader {
                     .map_err(|e| e.to_string())?;
                 }
                 Type::Int => {
-                    write!(self.source, "uint32_t {}", param.name).map_err(|e| e.to_string())?;
+                    write!(
+                        self.source,
+                        "constant uint& {} [[constant({})]]",
+                        param.name, index
+                    )
+                    .map_err(|e| e.to_string())?;
                 }
                 _ => {
                     return Err(format!(
@@ -104,7 +107,7 @@ impl MetalShader {
             Statement::VariableDecl(decl) => {
                 write!(self.source, "{}", indent).map_err(|e| e.to_string())?;
                 match decl.var_type {
-                    Type::Int => write!(self.source, "uint32_t").map_err(|e| e.to_string())?,
+                    Type::Int => write!(self.source, "int32_t").map_err(|e| e.to_string())?,
                     _ => write!(self.source, "{}", decl.var_type).map_err(|e| e.to_string())?,
                 }
                 write!(self.source, " {} = ", decl.name).map_err(|e| e.to_string())?;
@@ -159,8 +162,7 @@ impl MetalShader {
             }
             Expression::ThreadIdx(_) | Expression::BlockIdx(_) | Expression::BlockDim(_) => {
                 write!(self.source, "index").map_err(|e| e.to_string())?;
-            }
-            _ => return Err(format!("Unsupported expression: {:?}", expr)),
+            } // _ => return Err(format!("Unsupported expression: {:?}", expr)),
         }
         Ok(())
     }

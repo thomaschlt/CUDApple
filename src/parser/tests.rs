@@ -382,9 +382,9 @@ mod tests {
 
         for stmt in statements {
             if let Statement::CompoundAssign {
-                target,
+                target: _,
                 operator,
-                value,
+                value: _,
             } = stmt
             {
                 compound_ops_found += 1;

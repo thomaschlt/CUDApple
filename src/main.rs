@@ -113,13 +113,17 @@ fn main() -> Result<()> {
     log::info!("Generated Metal shader: {:?}", shader_path);
 
     // Generate Swift host code from template
-    let config: metal::host::MetalKernelConfig = metal::host::MetalKernelConfig {
+    let config = metal::host::MetalKernelConfig {
         grid_size: (4096, 1, 1),
         threadgroup_size: (256, 1, 1),
     };
 
-    let host_generator =
-        metal::host::MetalHostGenerator::new(config, metal_shader.source().to_string());
+    let kernel = &cuda_program.device_code[0]; // Get first kernel
+    let host_generator = metal::host::MetalHostGenerator::new(
+        config,
+        metal_shader.source().to_string(),
+        kernel.clone(),
+    );
     let (swift_runner_code, swift_main_code) = host_generator.generate_swift_code();
 
     // Write Swift host code
