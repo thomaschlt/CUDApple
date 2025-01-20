@@ -1,8 +1,10 @@
 use crate::parser::unified_ast::{KernelFunction, Type};
 
+#[derive(Debug, Clone)]
 pub struct MetalKernelConfig {
     pub grid_size: (u32, u32, u32),
     pub threadgroup_size: (u32, u32, u32),
+    pub dimensions: u32, // 1 for 1D, 2 for 2D
 }
 
 pub struct MetalHostGenerator {
@@ -24,11 +26,29 @@ impl MetalHostGenerator {
         let runner_template = include_str!("./templates/metal_runner.swift");
         let main_template = include_str!("./templates/main.swift");
 
-        // Generate dynamic kernel function
         let kernel_function = self.generate_kernel_function();
-
-        // Generate dynamic parameter initialization
         let parameter_init = self.generate_parameter_initialization();
+
+        // Calculate dimensions and sizes for the kernel config
+        let (width, height) = match self.config.dimensions {
+            1 => ("nil".to_string(), "nil".to_string()),
+            2 => {
+                let m = self
+                    .kernel
+                    .parameters
+                    .iter()
+                    .find(|p| p.name == "M")
+                    .expect("2D kernel requires M parameter");
+                let n = self
+                    .kernel
+                    .parameters
+                    .iter()
+                    .find(|p| p.name == "N")
+                    .expect("2D kernel requires N parameter");
+                ("M".to_string(), "N".to_string())
+            }
+            _ => panic!("Unsupported dimensions"),
+        };
 
         let runner_code = runner_template
             .replace("{{KERNEL_DEFINITIONS}}", &self.shader)
@@ -41,7 +61,10 @@ impl MetalHostGenerator {
             .replace(
                 "{{THREADGROUP_SIZE}}",
                 &format!("{:?}", self.config.threadgroup_size),
-            );
+            )
+            .replace("{{DIMENSIONS}}", &self.config.dimensions.to_string())
+            .replace("{{WIDTH}}", &width)
+            .replace("{{HEIGHT}}", &height);
 
         let main_code = main_template
             .replace("{{PARAMETER_INIT}}", &parameter_init)
@@ -52,17 +75,20 @@ impl MetalHostGenerator {
     }
 
     fn generate_kernel_function(&self) -> String {
+        // Generate parameter list with proper types
         let params = self
             .kernel
             .parameters
             .iter()
             .map(|p| match &p.param_type {
                 Type::Pointer(_) => format!("{}: [{}]", p.name, self.type_to_swift(&p.param_type)),
+                Type::Int => format!("{}: {}", p.name, self.type_to_swift(&p.param_type)),
                 _ => format!("{}: {}", p.name, self.type_to_swift(&p.param_type)),
             })
             .collect::<Vec<_>>()
             .join(", ");
 
+        // Get return type from last pointer parameter
         let return_type = self
             .kernel
             .parameters
@@ -72,6 +98,31 @@ impl MetalHostGenerator {
             .map(|p| self.type_to_swift(&p.param_type))
             .unwrap_or_else(|| "Float".to_string());
 
+        // Build inputs array including both array and scalar parameters
+        let inputs = self
+            .kernel
+            .parameters
+            .iter()
+            .map(|p| match &p.param_type {
+                Type::Pointer(_) => format!(
+                    "(data: {}, type: {}.self)",
+                    p.name,
+                    self.type_to_swift(&p.param_type)
+                ),
+                Type::Int => format!(
+                    "(data: {}, type: {}.self)",
+                    p.name,
+                    self.type_to_swift(&p.param_type)
+                ),
+                _ => format!(
+                    "(data: {}, type: {}.self)",
+                    p.name,
+                    self.type_to_swift(&p.param_type)
+                ),
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+
         format!(
             "extension MetalKernelRunner {{
                 func {}({}) throws -> [{}] {{
@@ -79,21 +130,7 @@ impl MetalHostGenerator {
                     return try executeKernel(inputs: inputs, outputType: {}.self)
                 }}
             }}",
-            self.kernel.name,
-            params,
-            return_type,
-            self.kernel
-                .parameters
-                .iter()
-                .filter(|p| matches!(p.param_type, Type::Pointer(_)))
-                .map(|p| format!(
-                    "(data: {}, type: {}.self)",
-                    p.name,
-                    self.type_to_swift(&p.param_type)
-                ))
-                .collect::<Vec<_>>()
-                .join(", "),
-            return_type
+            self.kernel.name, params, return_type, inputs, return_type
         )
     }
 
@@ -109,10 +146,20 @@ impl MetalHostGenerator {
     fn generate_parameter_initialization(&self) -> String {
         let mut init_code = String::new();
 
-        // Add problem size with explicit type
-        init_code.push_str("let problemSize = 1000000\n");
+        // Handle dimensions and problem size
+        match self.config.dimensions {
+            1 => {
+                init_code.push_str("let problemSize = 1000000\n");
+            }
+            2 => {
+                init_code.push_str("let M = 1000\n");
+                init_code.push_str("let N = 1000\n");
+                init_code.push_str("let problemSize = M * N\n");
+            }
+            _ => panic!("Unsupported dimensions"),
+        }
 
-        // Initialize arrays for each parameter
+        // Initialize arrays and scalar parameters
         for param in &self.kernel.parameters {
             match &param.param_type {
                 Type::Pointer(_) => {
@@ -124,7 +171,9 @@ impl MetalHostGenerator {
                     ));
                 }
                 Type::Int => {
-                    // Create Int32 scalar
+                    if param.name == "M" || param.name == "N" {
+                        continue;
+                    }
                     init_code.push_str(&format!(
                         "let {}: {} = {}(problemSize)\n",
                         param.name,
@@ -136,14 +185,30 @@ impl MetalHostGenerator {
             }
         }
 
-        // Add initialization loop using problemSize
+        // Initialize array values
         init_code.push_str("\nfor i in 0..<problemSize {\n");
         for param in &self.kernel.parameters {
             if let Type::Pointer(_) = param.param_type {
+                if param.name.contains("res") {
+                    init_code.push_str(&format!("    {}[i] = 0.0\n", param.name));
+                } else {
+                    init_code.push_str(&format!(
+                        "    {}[i] = Float.random(in: -1.0...1.0)\n",
+                        param.name
+                    ));
+                }
+            }
+        }
+        init_code.push_str("}\n\n");
+
+        // Add print statements for first few elements
+        init_code.push_str("print(\"\\n=== Input Values ===\\n\")\n");
+        init_code.push_str("for i in 0..<5 {\n");
+        for param in &self.kernel.parameters {
+            if let Type::Pointer(_) = param.param_type {
                 init_code.push_str(&format!(
-                    "    {}[i] = {}(i)\n",
-                    param.name,
-                    self.type_to_swift(&param.param_type)
+                    "    print(\"{0}[\\(i)] = \\({0}[i])\")\n",
+                    param.name
                 ));
             }
         }
@@ -153,14 +218,21 @@ impl MetalHostGenerator {
     }
 
     fn generate_kernel_call(&self) -> String {
-        let params = self
-            .kernel
-            .parameters
-            .iter()
-            .map(|p| format!("{}: {}", p.name, p.name))
-            .collect::<Vec<_>>()
-            .join(", ");
+        let mut inputs = Vec::new();
 
-        format!("let result = try runner.{}({})", self.kernel.name, params)
+        // Add array parameters
+        for param in &self.kernel.parameters {
+            if let Type::Pointer(_) = param.param_type {
+                inputs.push(format!("(data: {}, type: Float.self)", param.name));
+            }
+        }
+
+        // Add problem size as the last parameter
+        inputs.push("(data: UInt32(problemSize), type: UInt32.self)".to_string());
+
+        format!(
+            "let result = try runner.executeKernel(inputs: [{}], outputType: Float.self)",
+            inputs.join(", ")
+        )
     }
 }
