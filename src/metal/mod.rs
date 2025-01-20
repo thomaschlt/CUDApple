@@ -1,5 +1,7 @@
+use host::MetalKernelConfig;
+
 use crate::parser::unified_ast::{
-    CudaProgram, Expression, KernelFunction, Operator, Statement, Type,
+    CudaProgram, Dimension, Expression, KernelFunction, Operator, Statement, Type,
 };
 use std::fmt::Write;
 pub mod host;
@@ -7,13 +9,23 @@ pub mod host;
 #[derive(Debug)]
 pub struct MetalShader {
     source: String,
+    config: MetalKernelConfig,
 }
 
 impl MetalShader {
     pub fn new() -> Self {
         Self {
             source: String::new(),
+            config: MetalKernelConfig {
+                dimensions: 1, // Default to 1D
+                grid_size: (4096, 1, 1),
+                threadgroup_size: (256, 1, 1),
+            },
         }
+    }
+
+    pub fn set_config(&mut self, config: MetalKernelConfig) {
+        self.config = config;
     }
 
     pub fn generate(&mut self, program: &CudaProgram) -> Result<(), String> {
@@ -60,7 +72,7 @@ impl MetalShader {
                 Type::Int => {
                     write!(
                         self.source,
-                        "constant uint& {} [[constant({})]]",
+                        "constant uint& {} [[buffer({})]]",
                         param.name, index
                     )
                     .map_err(|e| e.to_string())?;
@@ -74,16 +86,52 @@ impl MetalShader {
             }
         }
 
-        // Add thread position parameter
+        // Add thread position parameters
         if !first {
             writeln!(self.source, ",").map_err(|e| e.to_string())?;
         }
-        write!(
-            self.source,
-            "{}uint32_t index [[thread_position_in_grid]]",
-            param_indent
-        )
+        match self.config.dimensions {
+            1 => {
+                write!(
+                    self.source,
+                    "{}uint32_t index [[thread_position_in_grid]]",
+                    param_indent
+                )
+            }
+            2 => {
+                writeln!(
+                    self.source,
+                    "{}uint3 thread_position_in_grid [[thread_position_in_grid]],",
+                    param_indent
+                )
+                .map_err(|e| e.to_string())?;
+                writeln!(
+                    self.source,
+                    "{}uint3 thread_position_in_threadgroup [[thread_position_in_threadgroup]],",
+                    param_indent
+                )
+                .map_err(|e| e.to_string())?;
+                write!(
+                    self.source,
+                    "{}uint3 threadgroup_position_in_grid [[threadgroup_position_in_grid]]",
+                    param_indent
+                )
+            }
+            _ => return Err("Unsupported dimensions".to_string()),
+        }
         .map_err(|e| e.to_string())?;
+
+        // Add thread group size parameter if 2D
+        if self.config.dimensions == 2 {
+            writeln!(self.source, ",").map_err(|e| e.to_string())?;
+            write!(
+                self.source,
+                "{}uint32_t threadgroup_size [[threads_per_threadgroup]]",
+                param_indent
+            )
+            .map_err(|e| e.to_string())?;
+        }
+
         writeln!(self.source, ") {{").map_err(|e| e.to_string())?;
 
         // Translate kernel body statements with proper indentation
@@ -135,6 +183,88 @@ impl MetalShader {
                 self.translate_expression(&assign.value)?;
                 writeln!(self.source, ";").map_err(|e| e.to_string())?;
             }
+            Statement::ForLoop {
+                init,
+                condition,
+                increment,
+                body,
+            } => {
+                // Write the for loop header
+                write!(self.source, "{}for (", indent).map_err(|e| e.to_string())?;
+
+                // Translate initialization
+                match &**init {
+                    Statement::VariableDecl(decl) => {
+                        let type_str = self.translate_type(&decl.var_type);
+                        write!(self.source, "{} {} = ", type_str, decl.name)
+                            .map_err(|e| e.to_string())?;
+                        if let Some(init_val) = &decl.initializer {
+                            self.translate_expression(init_val)?;
+                        }
+                    }
+                    _ => return Err("Unsupported for loop initialization".to_string()),
+                }
+
+                // Translate condition and increment
+                write!(self.source, "; ").map_err(|e| e.to_string())?;
+                self.translate_expression(&condition)?;
+                write!(self.source, "; ").map_err(|e| e.to_string())?;
+
+                // Handle increment
+                match &**increment {
+                    Statement::Assign(assign) => {
+                        self.translate_expression(&assign.target)?;
+                        write!(self.source, " = ").map_err(|e| e.to_string())?;
+                        self.translate_expression(&assign.value)?;
+                    }
+                    Statement::CompoundAssign {
+                        target,
+                        operator,
+                        value,
+                    } => {
+                        self.translate_expression(target)?;
+                        match operator {
+                            Operator::Add => write!(self.source, " += "),
+                            Operator::Subtract => write!(self.source, " -= "),
+                            Operator::Multiply => write!(self.source, " *= "),
+                            Operator::Divide => write!(self.source, " /= "),
+                            _ => return Err("Unsupported compound operator".to_string()),
+                        }
+                        .map_err(|e| e.to_string())?;
+                        self.translate_expression(value)?;
+                        writeln!(self.source, ";").map_err(|e| e.to_string())?;
+                    }
+                    _ => return Err("Unsupported for loop increment".to_string()),
+                }
+
+                // Close for loop header and translate body
+                writeln!(self.source, ") {{").map_err(|e| e.to_string())?;
+
+                // Translate body with additional indentation
+                for stmt in &body.statements {
+                    self.translate_statement_with_indent(stmt, &format!("{}    ", indent))?;
+                }
+
+                writeln!(self.source, "{}}}", indent).map_err(|e| e.to_string())?;
+            }
+            Statement::CompoundAssign {
+                target,
+                operator,
+                value,
+            } => {
+                write!(self.source, "{}", indent).map_err(|e| e.to_string())?;
+                self.translate_expression(target)?;
+                match operator {
+                    Operator::Add => write!(self.source, " += "),
+                    Operator::Subtract => write!(self.source, " -= "),
+                    Operator::Multiply => write!(self.source, " *= "),
+                    Operator::Divide => write!(self.source, " /= "),
+                    _ => return Err("Unsupported compound operator".to_string()),
+                }
+                .map_err(|e| e.to_string())?;
+                self.translate_expression(value)?;
+                writeln!(self.source, ";").map_err(|e| e.to_string())?;
+            }
             _ => return Err(format!("Unsupported statement: {:?}", stmt)),
         }
         Ok(())
@@ -149,6 +279,23 @@ impl MetalShader {
                 write!(self.source, "]").map_err(|e| e.to_string())?;
             }
             Expression::BinaryOp(lhs, op, rhs) => {
+                // Check for the complete CUDA thread index pattern
+                if let (
+                    Expression::BinaryOp(inner_lhs, Operator::Multiply, inner_rhs),
+                    Operator::Add,
+                    _,
+                ) = (&**lhs, op, &**rhs)
+                {
+                    if is_thread_index_component(inner_lhs)
+                        && is_thread_index_component(inner_rhs)
+                        && is_thread_index_component(rhs)
+                    {
+                        // This is the pattern blockIdx.x * blockDim.x + threadIdx.x
+                        write!(self.source, "index").map_err(|e| e.to_string())?;
+                        return Ok(());
+                    }
+                }
+                // Handle other binary operations normally
                 self.translate_expression(lhs)?;
                 write!(self.source, " {} ", Self::operator_to_string(op))
                     .map_err(|e| e.to_string())?;
@@ -168,7 +315,46 @@ impl MetalShader {
                 }
             }
             Expression::ThreadIdx(_) | Expression::BlockIdx(_) | Expression::BlockDim(_) => {
-                write!(self.source, "index").map_err(|e| e.to_string())?;
+                match self.config.dimensions {
+                    1 => write!(self.source, "index").map_err(|e| e.to_string())?,
+                    2 => match expr {
+                        Expression::ThreadIdx(component) => match component {
+                            Dimension::X => write!(self.source, "thread_position_in_threadgroup.x")
+                                .map_err(|e| e.to_string())?,
+                            Dimension::Y => write!(self.source, "thread_position_in_threadgroup.y")
+                                .map_err(|e| e.to_string())?,
+                            _ => {
+                                return Err(
+                                    "Only x and y components supported for ThreadIdx".to_string()
+                                )
+                            }
+                        },
+                        Expression::BlockIdx(component) => match component {
+                            Dimension::X => write!(self.source, "threadgroup_position_in_grid.x")
+                                .map_err(|e| e.to_string())?,
+                            Dimension::Y => write!(self.source, "threadgroup_position_in_grid.y")
+                                .map_err(|e| e.to_string())?,
+                            _ => {
+                                return Err(
+                                    "Only x and y components supported for BlockIdx".to_string()
+                                )
+                            }
+                        },
+                        Expression::BlockDim(component) => match component {
+                            Dimension::X => write!(self.source, "threads_per_threadgroup.x")
+                                .map_err(|e| e.to_string())?,
+                            Dimension::Y => write!(self.source, "threads_per_threadgroup.y")
+                                .map_err(|e| e.to_string())?,
+                            _ => {
+                                return Err(
+                                    "Only x and y components supported for BlockDim".to_string()
+                                )
+                            }
+                        },
+                        _ => unreachable!(),
+                    },
+                    _ => return Err("Unsupported dimension".to_string()),
+                }
             }
             Expression::MathFunction { name, arguments } => match name.as_str() {
                 "max" => {
@@ -179,17 +365,17 @@ impl MetalShader {
                     write!(self.source, ")").map_err(|e| e.to_string())?;
                 }
                 "expf" => {
-                    write!(self.source, "expf(").map_err(|e| e.to_string())?;
+                    write!(self.source, "exp(").map_err(|e| e.to_string())?;
                     self.translate_expression(&arguments[0])?;
                     write!(self.source, ")").map_err(|e| e.to_string())?;
                 }
                 _ => return Err(format!("Unsupported math function: {:?}", name)),
             },
             Expression::Infinity => {
-                write!(self.source, "as_type<float>(0x7F800000)").map_err(|e| e.to_string())?;
+                write!(self.source, "INFINITY").map_err(|e| e.to_string())?;
             }
             Expression::NegativeInfinity => {
-                write!(self.source, "-as_type<float>(0x7F800000)").map_err(|e| e.to_string())?;
+                write!(self.source, "-INFINITY").map_err(|e| e.to_string())?;
             }
         }
         Ok(())
@@ -208,4 +394,21 @@ impl MetalShader {
     pub fn source(&self) -> &str {
         &self.source
     }
+
+    fn translate_type(&self, t: &Type) -> String {
+        match t {
+            Type::Int => "int".to_string(),
+            Type::Float => "float".to_string(),
+            Type::Void => "void".to_string(),
+            Type::Pointer(inner) => self.translate_type(inner),
+            _ => "float".to_string(), // Default fallback
+        }
+    }
+}
+
+fn is_thread_index_component(expr: &Expression) -> bool {
+    matches!(
+        expr,
+        Expression::ThreadIdx(_) | Expression::BlockIdx(_) | Expression::BlockDim(_)
+    )
 }
