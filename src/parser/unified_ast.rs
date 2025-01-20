@@ -29,6 +29,7 @@ pub enum Statement {
         operator: Operator,
         value: Expression,
     },
+    Expression(Box<Expression>),
 }
 
 #[derive(Debug, Clone, PartialEq)]

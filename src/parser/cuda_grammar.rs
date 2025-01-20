@@ -58,13 +58,12 @@ peg::parser! {
             }
 
         rule statement() -> Statement
-            = _ s:(
-                variable_declaration() /
-                assignment() /
-                if_statement()
-            ) _ {
-                s
-            }
+            = for_loop()
+            / variable_declaration()
+            / compound_assignment()
+            / assignment()
+            / if_statement()
+            / e:expression() _ ";" { Statement::Expression(Box::new(e)) }
 
         rule variable_declaration() -> Statement
             = var_type:type_specifier() _ name:identifier() _ ptr:"*"? _ ";" {
@@ -104,6 +103,59 @@ peg::parser! {
                 Statement::IfStmt {
                     condition,
                     body
+                }
+            }
+
+        rule for_loop() -> Statement
+            = "for" _ "(" _
+              init:for_init() _ ";" _
+              condition:expression() _ ";" _
+              increment:for_increment() _
+              ")" _
+              body:block() {
+                Statement::ForLoop {
+                    init: Box::new(init),
+                    condition,
+                    increment: Box::new(increment),
+                    body,
+                }
+            }
+
+        rule for_init() -> Statement
+            = var_type:type_specifier() _ name:identifier() _ "=" _ value:expression() {
+                Statement::VariableDecl(Declaration {
+                    var_type,
+                    name,
+                    initializer: Some(value),
+                })
+            }
+
+        rule for_increment() -> Statement
+            = target:identifier() _ "++" {
+                Statement::Assign(Assignment {
+                    target: Expression::Variable(target.clone()),
+                    value: Expression::BinaryOp(
+                        Box::new(Expression::Variable(target)),
+                        Operator::Add,
+                        Box::new(Expression::IntegerLiteral(1))
+                    )
+                })
+            }
+            / target:identifier() _ "=" _ target2:identifier() _ "+" _ value:expression() {
+                Statement::Assign(Assignment {
+                    target: Expression::Variable(target),
+                    value: Expression::BinaryOp(
+                        Box::new(Expression::Variable(target2)),
+                        Operator::Add,
+                        Box::new(value)
+                    )
+                })
+            }
+            / target:identifier() _ "+=" _ value:expression() {
+                Statement::CompoundAssign {
+                    target: Expression::Variable(target),
+                    operator: Operator::Add,
+                    value
                 }
             }
 
@@ -175,5 +227,20 @@ peg::parser! {
             = "x" { Dimension::X }
             / "y" { Dimension::Y }
             / "z" { Dimension::Z }
+
+        rule compound_assignment() -> Statement
+            = target:(array_access() / variable()) _ op:compound_operator() _ value:expression() _ ";" {
+                Statement::CompoundAssign {
+                    target,
+                    operator: op,
+                    value
+                }
+            }
+
+        rule compound_operator() -> Operator
+            = "+=" { Operator::Add }
+            / "-=" { Operator::Subtract }
+            / "*=" { Operator::Multiply }
+            / "/=" { Operator::Divide }
     }
 }
