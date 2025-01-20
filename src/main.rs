@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use clap::{ArgAction, Parser};
+use parser::unified_ast::{Expression, KernelFunction, Operator, Statement, Type};
 
 use std::fs;
 use std::path::PathBuf;
@@ -61,6 +62,57 @@ fn ensure_output_dir(path: &PathBuf) -> Result<()> {
     Ok(())
 }
 
+fn determine_kernel_dimensions(kernel: &KernelFunction) -> u32 {
+    // Check kernel parameters for M, N dimensions
+    let has_mn_params = kernel
+        .parameters
+        .iter()
+        .any(|p| matches!(p.param_type, Type::Int) && (p.name == "M" || p.name == "N"));
+
+    // Check for matrix indexing patterns (row * N + col)
+    fn has_matrix_indexing(expr: &Expression) -> bool {
+        match expr {
+            Expression::BinaryOp(lhs, op, rhs) => {
+                match op {
+                    Operator::Add => {
+                        // Check for pattern: row * N + col
+                        if let Expression::BinaryOp(_, Operator::Multiply, _) = **lhs {
+                            true
+                        } else {
+                            has_matrix_indexing(lhs) || has_matrix_indexing(rhs)
+                        }
+                    }
+                    _ => has_matrix_indexing(lhs) || has_matrix_indexing(rhs),
+                }
+            }
+            _ => false,
+        }
+    }
+
+    // Traverse statements to find matrix operations
+    for stmt in &kernel.body.statements {
+        match stmt {
+            Statement::Assign(assign) => {
+                if has_matrix_indexing(&assign.value) {
+                    return 2;
+                }
+            }
+            Statement::ForLoop { .. } => {
+                // Nested loops often indicate 2D operations
+                return 2;
+            }
+            _ => continue,
+        }
+    }
+
+    // If we have M,N parameters, it's likely 2D
+    if has_mn_params {
+        2
+    } else {
+        1
+    }
+}
+
 fn main() -> Result<()> {
     let args = Args::parse();
 
@@ -102,6 +154,24 @@ fn main() -> Result<()> {
 
     // Generate Metal shader
     let mut metal_shader = metal::MetalShader::new();
+
+    // Set the config after creation
+    let dimensions = determine_kernel_dimensions(&cuda_program.device_code[0]);
+    let config = metal::host::MetalKernelConfig {
+        dimensions,
+        grid_size: match dimensions {
+            1 => (4096, 1, 1),
+            2 => (32, 32, 1),
+            _ => panic!("Unsupported dimensions"),
+        },
+        threadgroup_size: match dimensions {
+            1 => (256, 1, 1),
+            2 => (16, 16, 1),
+            _ => panic!("Unsupported dimensions"),
+        },
+    };
+    metal_shader.set_config(config.clone());
+
     metal_shader
         .generate(&cuda_program)
         .map_err(|e| anyhow::anyhow!("Failed to generate Metal shader: {}", e))?;
@@ -113,9 +183,19 @@ fn main() -> Result<()> {
     log::info!("Generated Metal shader: {:?}", shader_path);
 
     // Generate Swift host code from template
+    let dimensions = determine_kernel_dimensions(&cuda_program.device_code[0]);
     let config = metal::host::MetalKernelConfig {
-        grid_size: (4096, 1, 1),
-        threadgroup_size: (256, 1, 1),
+        dimensions,
+        grid_size: match dimensions {
+            1 => (4096, 1, 1),
+            2 => (32, 32, 1),
+            _ => panic!("Unsupported dimensions"),
+        },
+        threadgroup_size: match dimensions {
+            1 => (256, 1, 1),
+            2 => (16, 16, 1),
+            _ => panic!("Unsupported dimensions"),
+        },
     };
 
     let kernel = &cuda_program.device_code[0]; // Get first kernel
