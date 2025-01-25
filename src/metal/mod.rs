@@ -10,6 +10,7 @@ pub mod host;
 pub struct MetalShader {
     source: String,
     config: MetalKernelConfig,
+    thread_vars_declared: bool,
 }
 
 impl MetalShader {
@@ -21,6 +22,7 @@ impl MetalShader {
                 grid_size: (4096, 1, 1),
                 threadgroup_size: (256, 1, 1),
             },
+            thread_vars_declared: false,
         }
     }
 
@@ -99,21 +101,9 @@ impl MetalShader {
                 )
             }
             2 => {
-                writeln!(
-                    self.source,
-                    "{}uint3 thread_position_in_grid [[thread_position_in_grid]],",
-                    param_indent
-                )
-                .map_err(|e| e.to_string())?;
-                writeln!(
-                    self.source,
-                    "{}uint3 thread_position_in_threadgroup [[thread_position_in_threadgroup]],",
-                    param_indent
-                )
-                .map_err(|e| e.to_string())?;
                 write!(
                     self.source,
-                    "{}uint3 threadgroup_position_in_grid [[threadgroup_position_in_grid]]",
+                    "{}uint2 thread_position_in_grid [[thread_position_in_grid]]",
                     param_indent
                 )
             }
@@ -121,16 +111,16 @@ impl MetalShader {
         }
         .map_err(|e| e.to_string())?;
 
-        // Add thread group size parameter if 2D
-        if self.config.dimensions == 2 {
-            writeln!(self.source, ",").map_err(|e| e.to_string())?;
-            write!(
-                self.source,
-                "{}uint32_t threadgroup_size [[threads_per_threadgroup]]",
-                param_indent
-            )
-            .map_err(|e| e.to_string())?;
-        }
+        // // Add thread group size parameter if 2D
+        // if self.config.dimensions == 2 {
+        //     writeln!(self.source, ",").map_err(|e| e.to_string())?;
+        //     write!(
+        //         self.source,
+        //         "{}uint32_t threadgroup_size [[threads_per_threadgroup]]",
+        //         param_indent
+        //     )
+        //     .map_err(|e| e.to_string())?;
+        // }
 
         writeln!(self.source, ") {{").map_err(|e| e.to_string())?;
 
@@ -272,14 +262,23 @@ impl MetalShader {
 
     fn translate_expression(&mut self, expr: &Expression) -> Result<(), String> {
         match expr {
+            Expression::ThreadIdx(dim) | Expression::BlockIdx(dim) => {
+                match dim {
+                    Dimension::X => write!(self.source, "col"),
+                    Dimension::Y => write!(self.source, "row"),
+                    _ => return Err("Unsupported thread index dimension".to_string()),
+                }
+                .map_err(|e| e.to_string())?;
+                return Ok(());
+            }
             Expression::ArrayAccess { array, index } => {
                 self.translate_expression(array)?;
                 write!(self.source, "[").map_err(|e| e.to_string())?;
                 self.translate_expression(index)?;
                 write!(self.source, "]").map_err(|e| e.to_string())?;
+                return Ok(());
             }
             Expression::BinaryOp(lhs, op, rhs) => {
-                // Check for the complete CUDA thread index pattern
                 if let (
                     Expression::BinaryOp(inner_lhs, Operator::Multiply, inner_rhs),
                     Operator::Add,
@@ -290,22 +289,37 @@ impl MetalShader {
                         && is_thread_index_component(inner_rhs)
                         && is_thread_index_component(rhs)
                     {
-                        // This is the pattern blockIdx.x * blockDim.x + threadIdx.x
-                        write!(self.source, "index").map_err(|e| e.to_string())?;
+                        match self.config.dimensions {
+                            1 => {
+                                write!(self.source, "index").map_err(|e| e.to_string())?;
+                            }
+                            2 => {
+                                if is_x_component(rhs) {
+                                    write!(self.source, "thread_position_in_grid.x")
+                                        .map_err(|e| e.to_string())?;
+                                } else if is_y_component(rhs) {
+                                    write!(self.source, "thread_position_in_grid.y")
+                                        .map_err(|e| e.to_string())?;
+                                }
+                            }
+                            _ => return Err("Unsupported dimensions".to_string()),
+                        }
                         return Ok(());
                     }
                 }
-                // Handle other binary operations normally
                 self.translate_expression(lhs)?;
                 write!(self.source, " {} ", Self::operator_to_string(op))
                     .map_err(|e| e.to_string())?;
                 self.translate_expression(rhs)?;
+                return Ok(());
             }
             Expression::Variable(name) => {
                 write!(self.source, "{}", name).map_err(|e| e.to_string())?;
+                return Ok(());
             }
             Expression::IntegerLiteral(value) => {
                 write!(self.source, "{}", value).map_err(|e| e.to_string())?;
+                return Ok(());
             }
             Expression::FloatLiteral(value) => {
                 if value.fract() == 0.0 {
@@ -313,48 +327,17 @@ impl MetalShader {
                 } else {
                     write!(self.source, "{}f", value).map_err(|e| e.to_string())?;
                 }
+                return Ok(());
             }
-            Expression::ThreadIdx(_) | Expression::BlockIdx(_) | Expression::BlockDim(_) => {
-                match self.config.dimensions {
-                    1 => write!(self.source, "index").map_err(|e| e.to_string())?,
-                    2 => match expr {
-                        Expression::ThreadIdx(component) => match component {
-                            Dimension::X => write!(self.source, "thread_position_in_threadgroup.x")
-                                .map_err(|e| e.to_string())?,
-                            Dimension::Y => write!(self.source, "thread_position_in_threadgroup.y")
-                                .map_err(|e| e.to_string())?,
-                            _ => {
-                                return Err(
-                                    "Only x and y components supported for ThreadIdx".to_string()
-                                )
-                            }
-                        },
-                        Expression::BlockIdx(component) => match component {
-                            Dimension::X => write!(self.source, "threadgroup_position_in_grid.x")
-                                .map_err(|e| e.to_string())?,
-                            Dimension::Y => write!(self.source, "threadgroup_position_in_grid.y")
-                                .map_err(|e| e.to_string())?,
-                            _ => {
-                                return Err(
-                                    "Only x and y components supported for BlockIdx".to_string()
-                                )
-                            }
-                        },
-                        Expression::BlockDim(component) => match component {
-                            Dimension::X => write!(self.source, "threads_per_threadgroup.x")
-                                .map_err(|e| e.to_string())?,
-                            Dimension::Y => write!(self.source, "threads_per_threadgroup.y")
-                                .map_err(|e| e.to_string())?,
-                            _ => {
-                                return Err(
-                                    "Only x and y components supported for BlockDim".to_string()
-                                )
-                            }
-                        },
-                        _ => unreachable!(),
-                    },
-                    _ => return Err("Unsupported dimension".to_string()),
+            Expression::BlockDim(component) => {
+                match component {
+                    Dimension::X => write!(self.source, "threads_per_threadgroup.x")
+                        .map_err(|e| e.to_string())?,
+                    Dimension::Y => write!(self.source, "threads_per_threadgroup.y")
+                        .map_err(|e| e.to_string())?,
+                    _ => return Err("Only x and y components supported for BlockDim".to_string()),
                 }
+                return Ok(());
             }
             Expression::MathFunction { name, arguments } => match name.as_str() {
                 "max" => {
@@ -363,19 +346,23 @@ impl MetalShader {
                     write!(self.source, ", ").map_err(|e| e.to_string())?;
                     self.translate_expression(&arguments[1])?;
                     write!(self.source, ")").map_err(|e| e.to_string())?;
+                    return Ok(());
                 }
                 "expf" => {
                     write!(self.source, "exp(").map_err(|e| e.to_string())?;
                     self.translate_expression(&arguments[0])?;
                     write!(self.source, ")").map_err(|e| e.to_string())?;
+                    return Ok(());
                 }
                 _ => return Err(format!("Unsupported math function: {:?}", name)),
             },
             Expression::Infinity => {
                 write!(self.source, "INFINITY").map_err(|e| e.to_string())?;
+                return Ok(());
             }
             Expression::NegativeInfinity => {
                 write!(self.source, "-INFINITY").map_err(|e| e.to_string())?;
+                return Ok(());
             }
         }
         Ok(())
@@ -388,6 +375,8 @@ impl MetalShader {
             Operator::Multiply => "*",
             Operator::Divide => "/",
             Operator::LessThan => "<",
+            Operator::LogicalAnd => "&&",
+            Operator::LogicalOr => "||",
         }
     }
 
@@ -410,5 +399,19 @@ fn is_thread_index_component(expr: &Expression) -> bool {
     matches!(
         expr,
         Expression::ThreadIdx(_) | Expression::BlockIdx(_) | Expression::BlockDim(_)
+    )
+}
+
+fn is_x_component(expr: &Expression) -> bool {
+    matches!(
+        expr,
+        Expression::ThreadIdx(Dimension::X) | Expression::BlockIdx(Dimension::X)
+    )
+}
+
+fn is_y_component(expr: &Expression) -> bool {
+    matches!(
+        expr,
+        Expression::ThreadIdx(Dimension::Y) | Expression::BlockIdx(Dimension::Y)
     )
 }

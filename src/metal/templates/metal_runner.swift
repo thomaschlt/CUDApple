@@ -97,14 +97,15 @@ class MetalKernelRunner {
         print("Grid Size: \(config.gridSize)")
         print("Thread Group Size: \(config.threadGroupSize)")
         print("Problem Size: \(problemSize)")
-        print("Total Threads: \(config.gridSize.width * config.threadGroupSize.width)")
+        print("Total Threads: \(config.gridSize.width * config.gridSize.height * config.threadGroupSize.width * config.threadGroupSize.height)")
         
         // Verify configuration
-        if config.gridSize.width * config.threadGroupSize.width < problemSize {
+        if (config.gridSize.width * config.gridSize.height * 
+            config.threadGroupSize.width * config.threadGroupSize.height) < problemSize {
             print("Warning: Grid size might be insufficient for problem size")
         }
         
-        computeEncoder.dispatchThreads(config.gridSize, 
+        computeEncoder.dispatchThreadgroups(config.gridSize, 
                                      threadsPerThreadgroup: config.threadGroupSize)
         
         computeEncoder.endEncoding()
@@ -204,8 +205,12 @@ struct KernelConfig {
             
             let threadGroupSize = MTLSize(width: 16, height: 16, depth: 1)
             let gridSize = MTLSize(
-                width: (w + 15) / 16,  // Ceiling division for M dimension
-                height: (h + 15) / 16, // Ceiling division for N dimension
+                // width: (w + 15) / 16,  // Ceiling division for M dimension
+                // height: (h + 15) / 16, // Ceiling division for N dimension
+                // width: (w + threadGroupSize.width - 1) / threadGroupSize.width,
+                // height: (h + threadGroupSize.height - 1) / threadGroupSize.height,
+                width: w,
+                height: h,
                 depth: 1
             )
             return KernelConfig(gridSize: gridSize, threadGroupSize: threadGroupSize)
