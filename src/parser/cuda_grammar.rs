@@ -188,6 +188,8 @@ peg::parser! {
             / n:number() _ "*" _ "-" _ "INFINITY" { Expression::NegativeInfinity }
 
         rule expression() -> Expression = precedence! {
+            x:(@) _ "&&" _ y:@ { Expression::BinaryOp(Box::new(x), Operator::LogicalAnd, Box::new(y))}
+            x:(@) _ "||" _ y:@ {Expression::BinaryOp(Box::new(x), Operator::LogicalOr, Box::new(y))}
             x:(@) _ "<" _ y:@ { Expression::BinaryOp(Box::new(x), Operator::LessThan, Box::new(y)) }
             --
             x:(@) _ "+" _ y:@ { Expression::BinaryOp(Box::new(x), Operator::Add, Box::new(y)) }

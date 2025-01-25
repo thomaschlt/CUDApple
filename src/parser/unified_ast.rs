@@ -99,6 +99,8 @@ pub enum Operator {
     Multiply,
     Divide,
     LessThan,
+    LogicalAnd,
+    LogicalOr,
 }
 
 #[derive(Debug, Clone, PartialEq)]

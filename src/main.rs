@@ -3,6 +3,7 @@ use clap::{ArgAction, Parser};
 use parser::unified_ast::{Expression, KernelFunction, Operator, Statement, Type};
 
 use std::fs;
+use std::os::unix::thread;
 use std::path::PathBuf;
 
 pub mod metal;
@@ -155,13 +156,22 @@ fn main() -> Result<()> {
     // Generate Metal shader
     let mut metal_shader = metal::MetalShader::new();
 
-    // Set the config after creation
+    // Create config once
     let dimensions = determine_kernel_dimensions(&cuda_program.device_code[0]);
     let config = metal::host::MetalKernelConfig {
         dimensions,
         grid_size: match dimensions {
             1 => (4096, 1, 1),
-            2 => (32, 32, 1),
+            2 => {
+                let thread_group_size = 16;
+                let m = 1000;
+                let n = 1000;
+                (
+                    ((n + thread_group_size - 1) / thread_group_size),
+                    ((m + thread_group_size - 1) / thread_group_size),
+                    1,
+                )
+            }
             _ => panic!("Unsupported dimensions"),
         },
         threadgroup_size: match dimensions {
@@ -170,8 +180,9 @@ fn main() -> Result<()> {
             _ => panic!("Unsupported dimensions"),
         },
     };
-    metal_shader.set_config(config.clone());
 
+    // Use config for Metal shader
+    metal_shader.set_config(config.clone());
     metal_shader
         .generate(&cuda_program)
         .map_err(|e| anyhow::anyhow!("Failed to generate Metal shader: {}", e))?;
@@ -179,28 +190,12 @@ fn main() -> Result<()> {
     // Write Metal shader
     let shader_path = args.output.join("kernel.metal");
     fs::write(&shader_path, metal_shader.source()).context("Failed to write Metal shader")?;
-
     log::info!("Generated Metal shader: {:?}", shader_path);
 
-    // Generate Swift host code from template
-    let dimensions = determine_kernel_dimensions(&cuda_program.device_code[0]);
-    let config = metal::host::MetalKernelConfig {
-        dimensions,
-        grid_size: match dimensions {
-            1 => (4096, 1, 1),
-            2 => (32, 32, 1),
-            _ => panic!("Unsupported dimensions"),
-        },
-        threadgroup_size: match dimensions {
-            1 => (256, 1, 1),
-            2 => (16, 16, 1),
-            _ => panic!("Unsupported dimensions"),
-        },
-    };
-
-    let kernel = &cuda_program.device_code[0]; // Get first kernel
+    // Generate Swift host code using the same config
+    let kernel = &cuda_program.device_code[0];
     let host_generator = metal::host::MetalHostGenerator::new(
-        config,
+        config, // Reuse the same config here
         metal_shader.source().to_string(),
         kernel.clone(),
     );
