@@ -38,7 +38,6 @@ fn validate_input(path: &PathBuf) -> Result<()> {
         anyhow::bail!("Input file does not exist: {:?}", path);
     }
 
-    // Check if it's a file
     if !path.is_file() {
         anyhow::bail!("Input path is not a file: {:?}", path);
     }
@@ -63,33 +62,27 @@ fn ensure_output_dir(path: &PathBuf) -> Result<()> {
 }
 
 fn determine_kernel_dimensions(kernel: &KernelFunction) -> u32 {
-    // Check kernel parameters for M, N dimensions
     let has_mn_params = kernel
         .parameters
         .iter()
         .any(|p| matches!(p.param_type, Type::Int) && (p.name == "M" || p.name == "N"));
 
-    // Check for matrix indexing patterns (row * N + col)
     fn has_matrix_indexing(expr: &Expression) -> bool {
         match expr {
-            Expression::BinaryOp(lhs, op, rhs) => {
-                match op {
-                    Operator::Add => {
-                        // Check for pattern: row * N + col
-                        if let Expression::BinaryOp(_, Operator::Multiply, _) = **lhs {
-                            true
-                        } else {
-                            has_matrix_indexing(lhs) || has_matrix_indexing(rhs)
-                        }
+            Expression::BinaryOp(lhs, op, rhs) => match op {
+                Operator::Add => {
+                    if let Expression::BinaryOp(_, Operator::Multiply, _) = **lhs {
+                        true
+                    } else {
+                        has_matrix_indexing(lhs) || has_matrix_indexing(rhs)
                     }
-                    _ => has_matrix_indexing(lhs) || has_matrix_indexing(rhs),
                 }
-            }
+                _ => has_matrix_indexing(lhs) || has_matrix_indexing(rhs),
+            },
             _ => false,
         }
     }
 
-    // Traverse statements to find matrix operations
     for stmt in &kernel.body.statements {
         match stmt {
             Statement::Assign(assign) => {
@@ -98,14 +91,12 @@ fn determine_kernel_dimensions(kernel: &KernelFunction) -> u32 {
                 }
             }
             Statement::ForLoop { .. } => {
-                // Nested loops often indicate 2D operations
                 return 2;
             }
             _ => continue,
         }
     }
 
-    // If we have M,N parameters, it's likely 2D
     if has_mn_params {
         2
     } else {

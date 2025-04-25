@@ -9,7 +9,6 @@ use crate::parser::unified_ast::CudaProgram;
 use anyhow::Result;
 
 pub fn parse_cuda(source: &str) -> Result<CudaProgram> {
-    // Parse kernel functions
     let kernel = cuda_parser::kernel_function(source)
         .map_err(|e| anyhow::anyhow!("Failed to parse kernel: {}", e.to_string()))?;
 

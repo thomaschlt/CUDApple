@@ -29,7 +29,6 @@ impl MetalHostGenerator {
         let kernel_function = self.generate_kernel_function();
         let parameter_init = self.generate_parameter_initialization();
 
-        // Calculate dimensions and sizes for the kernel config
         let (width, height) = match self.config.dimensions {
             1 => ("nil".to_string(), "nil".to_string()),
             2 => {
@@ -50,6 +49,7 @@ impl MetalHostGenerator {
             _ => panic!("Unsupported dimensions"),
         };
 
+        // not optimal
         let runner_code = runner_template
             .replace("{{KERNEL_DEFINITIONS}}", &self.shader)
             .replace("{{KERNEL_NAME}}", &self.kernel.name)
@@ -75,7 +75,6 @@ impl MetalHostGenerator {
     }
 
     fn generate_kernel_function(&self) -> String {
-        // Generate parameter list with proper types
         let params = self
             .kernel
             .parameters
@@ -88,7 +87,6 @@ impl MetalHostGenerator {
             .collect::<Vec<_>>()
             .join(", ");
 
-        // Get return type from last pointer parameter
         let return_type = self
             .kernel
             .parameters
@@ -98,7 +96,6 @@ impl MetalHostGenerator {
             .map(|p| self.type_to_swift(&p.param_type))
             .unwrap_or_else(|| "Float".to_string());
 
-        // Build inputs array including both array and scalar parameters
         let inputs = self
             .kernel
             .parameters
@@ -139,14 +136,13 @@ impl MetalHostGenerator {
             Type::Float => "Float".to_string(),
             Type::Int => "Int32".to_string(),
             Type::Pointer(inner) => self.type_to_swift(inner),
-            _ => "Float".to_string(), // Default fallback
+            _ => "Float".to_string(),
         }
     }
 
     fn generate_parameter_initialization(&self) -> String {
         let mut init_code = String::new();
 
-        // Handle dimensions and problem size
         match self.config.dimensions {
             1 => {
                 init_code.push_str("let problemSize = 1000000\n");
@@ -154,16 +150,14 @@ impl MetalHostGenerator {
             2 => {
                 init_code.push_str("let M = 1000\n");
                 init_code.push_str("let N = 1000\n");
-                init_code.push_str("let problemSize = Int(M) * Int(N)\n"); // Cast to Int for array sizing
+                init_code.push_str("let problemSize = Int(M) * Int(N)\n");
             }
             _ => panic!("Unsupported dimensions"),
         }
 
-        // Initialize arrays and scalar parameters
         let mut has_m = false;
         let mut has_n = false;
 
-        // First pass: check if M and N are present
         for param in &self.kernel.parameters {
             if let Type::Int = param.param_type {
                 if param.name == "M" {
@@ -174,7 +168,6 @@ impl MetalHostGenerator {
             }
         }
 
-        // Initialize M and N if needed for 2D kernels
         if self.config.dimensions == 2 {
             if !has_m {
                 init_code.push_str("let M: Int32 = 1000\n");
@@ -184,7 +177,6 @@ impl MetalHostGenerator {
             }
         }
 
-        // Initialize other parameters
         for param in &self.kernel.parameters {
             match &param.param_type {
                 Type::Pointer(_) => {
@@ -197,7 +189,7 @@ impl MetalHostGenerator {
                 }
                 Type::Int => {
                     if param.name == "M" || param.name == "N" {
-                        continue; // Skip M and N as they're already handled
+                        continue;
                     }
                     init_code.push_str(&format!(
                         "let {}: {} = {}(problemSize)\n",
@@ -210,12 +202,10 @@ impl MetalHostGenerator {
             }
         }
 
-        // Initialize array values
         init_code.push_str("\nfor i in 0..<problemSize {\n");
         for param in &self.kernel.parameters {
             if let Type::Pointer(_) = param.param_type {
                 if param.name.contains("res") || param.name.contains("C") {
-                    // Add "C" for matrix output
                     init_code.push_str(&format!("    {}[i] = 0.0\n", param.name));
                 } else {
                     init_code.push_str(&format!(
@@ -227,7 +217,6 @@ impl MetalHostGenerator {
         }
         init_code.push_str("}\n\n");
 
-        // Add print statements for first few elements
         init_code.push_str("print(\"\\n=== Input Values ===\\n\")\n");
         init_code.push_str("for i in 0..<5 {\n");
         for param in &self.kernel.parameters {
@@ -246,7 +235,6 @@ impl MetalHostGenerator {
     fn generate_kernel_call(&self) -> String {
         let mut inputs = Vec::new();
 
-        // Preserve CUDA kernel parameter order
         for param in &self.kernel.parameters {
             match &param.param_type {
                 Type::Pointer(_) => {

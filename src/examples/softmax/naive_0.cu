@@ -1,3 +1,4 @@
+// naive CUDA kernel for softmax (not working atm)
 __global__ void softmax_kernel_0(float *matd, float *resd, int M, int N)
 {
     int row = blockDim.x * blockIdx.x + threadIdx.x;
