@@ -3,7 +3,6 @@ use clap::{ArgAction, Parser};
 use parser::unified_ast::{Expression, KernelFunction, Operator, Statement, Type};
 
 use std::fs;
-use std::os::unix::thread;
 use std::path::PathBuf;
 
 pub mod metal;

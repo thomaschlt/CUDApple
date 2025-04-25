@@ -10,7 +10,6 @@ pub mod host;
 pub struct MetalShader {
     source: String,
     config: MetalKernelConfig,
-    thread_vars_declared: bool,
 }
 
 impl MetalShader {
@@ -22,7 +21,6 @@ impl MetalShader {
                 grid_size: (4096, 1, 1),
                 threadgroup_size: (256, 1, 1),
             },
-            thread_vars_declared: false,
         }
     }
 
@@ -365,7 +363,6 @@ impl MetalShader {
                 return Ok(());
             }
         }
-        Ok(())
     }
 
     fn operator_to_string(op: &Operator) -> &'static str {
@@ -390,7 +387,6 @@ impl MetalShader {
             Type::Float => "float".to_string(),
             Type::Void => "void".to_string(),
             Type::Pointer(inner) => self.translate_type(inner),
-            _ => "float".to_string(), // Default fallback
         }
     }
 }

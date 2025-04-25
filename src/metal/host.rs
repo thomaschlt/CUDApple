@@ -4,7 +4,7 @@ use crate::parser::unified_ast::{KernelFunction, Type};
 pub struct MetalKernelConfig {
     pub grid_size: (u32, u32, u32),
     pub threadgroup_size: (u32, u32, u32),
-    pub dimensions: u32, // 1 for 1D, 2 for 2D
+    pub dimensions: u32,
 }
 
 pub struct MetalHostGenerator {
@@ -33,13 +33,13 @@ impl MetalHostGenerator {
         let (width, height) = match self.config.dimensions {
             1 => ("nil".to_string(), "nil".to_string()),
             2 => {
-                let m = self
+                let _m = self
                     .kernel
                     .parameters
                     .iter()
                     .find(|p| p.name == "M")
                     .expect("2D kernel requires M parameter");
-                let n = self
+                let _n = self
                     .kernel
                     .parameters
                     .iter()
