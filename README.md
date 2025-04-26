@@ -2,6 +2,8 @@
 
 Welcome to CUDApple, a project aimed at translating CUDA kernels into Metal shaders for execution on Apple Silicon devices. This project is a work in progress, with some components fully functional and others still under development.
 
+![CUDApple presentation](src/docs/image.png)
+
 ## What's Working
 
 - **Matrix and Vector Addition**: These operations have been successfully translated and executed using Metal.

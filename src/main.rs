@@ -104,10 +104,24 @@ fn determine_kernel_dimensions(kernel: &KernelFunction) -> u32 {
     }
 }
 
+fn print_banner() {
+    println!("\n\x1b[1;36m╺━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╸\x1b[0m");
+    println!(
+        "\x1b[1;33m   CUDApple v{}\x1b[0m",
+        env!("CARGO_PKG_VERSION")
+    );
+    println!("\x1b[0m   Running CUDA code directly on your Mac chip");
+    println!("\x1b[1;36m╺━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╸\x1b[0m\n");
+}
+
+fn print_section_header(title: &str) {
+    println!("\n\x1b[1;35m=== {} ===\x1b[0m", title);
+}
+
 fn main() -> Result<()> {
     let args = Args::parse();
 
-    // Initialize logger
+    // Initialize logger with custom format
     env_logger::Builder::new()
         .filter_level(match args.verbose {
             0 => log::LevelFilter::Warn,
@@ -115,35 +129,57 @@ fn main() -> Result<()> {
             2 => log::LevelFilter::Debug,
             _ => log::LevelFilter::Trace,
         })
+        .format(|buf, record| {
+            use std::io::Write;
+            let level_color = match record.level() {
+                log::Level::Error => "\x1b[1;31m", // Bright Red
+                log::Level::Warn => "\x1b[1;33m",  // Bright Yellow
+                log::Level::Info => "\x1b[1;32m",  // Bright Green
+                log::Level::Debug => "\x1b[1;36m", // Bright Cyan
+                log::Level::Trace => "\x1b[1;37m", // Bright White
+            };
+            writeln!(
+                buf,
+                "{}{:<5}\x1b[0m {}",
+                level_color,
+                record.level(),
+                record.args()
+            )
+        })
         .init();
+
+    print_banner();
 
     // Validate input file
     validate_input(&args.input).context("Input validation failed")?;
-
     // Ensure output directory exists
     ensure_output_dir(&args.output).context("Output directory setup failed")?;
 
-    // Log arguments
-    log::info!("Processing CUDA file: {:?}", args.input);
-    log::info!("Output directory: {:?}", args.output);
-    log::info!("Optimization level: {}", args.opt_level);
-
     // Read and parse the CUDA file
+    print_section_header("CUDA Source Analysis");
     let cuda_source = fs::read_to_string(&args.input).context("Failed to read CUDA source file")?;
-
     let cuda_program = parser::parse_cuda(&cuda_source).context("Failed to parse CUDA program")?;
 
-    log::debug!(
-        "Successfully parsed CUDA program with {} kernels",
-        cuda_program.device_code.len(),
+    log::info!(
+        "✓ Successfully parsed CUDA program with {} kernels",
+        cuda_program.device_code.len()
     );
 
     // Log kernels
     for kernel in &cuda_program.device_code {
-        log::info!("Found kernel: {}", kernel.name);
+        log::info!("📦 Found kernel: {}", kernel.name);
+
+        // Print kernel information
+        if args.verbose > 0 {
+            log::info!("   ├─ Parameters: {}", kernel.parameters.len());
+            for param in &kernel.parameters {
+                log::debug!("   │  ├─ {}: {:?}", param.name, param.param_type);
+            }
+        }
     }
 
     // Generate Metal shader
+    print_section_header("Metal Translation");
     let mut metal_shader = metal::MetalShader::new();
 
     // Create config once
@@ -177,15 +213,21 @@ fn main() -> Result<()> {
         .generate(&cuda_program)
         .map_err(|e| anyhow::anyhow!("Failed to generate Metal shader: {}", e))?;
 
+    log::info!("✓ Generated Metal shader code");
+    log::info!("   ├─ Dimensions: {}", dimensions);
+    log::info!("   ├─ Grid size: {:?}", config.grid_size);
+    log::info!("   └─ Thread group size: {:?}", config.threadgroup_size);
+
     // Write Metal shader
+    print_section_header("File Generation");
     let shader_path = args.output.join("kernel.metal");
     fs::write(&shader_path, metal_shader.source()).context("Failed to write Metal shader")?;
-    log::info!("Generated Metal shader: {:?}", shader_path);
+    log::info!("✓ Written Metal shader: {:?}", shader_path);
 
     // Generate Swift host code using the same config
     let kernel = &cuda_program.device_code[0];
     let host_generator = metal::host::MetalHostGenerator::new(
-        config, // Reuse the same config here
+        config,
         metal_shader.source().to_string(),
         kernel.clone(),
     );
@@ -198,10 +240,15 @@ fn main() -> Result<()> {
     let main_path = args.output.join("main.swift");
     fs::write(&main_path, swift_main_code).context("Failed to write Swift main code")?;
 
-    log::info!("Generated Swift files: {:?}, {:?}", host_path, main_path);
+    log::info!("✓ Written Swift files:");
+    log::info!("   ├─ {:?}", host_path);
+    log::info!("   └─ {:?}", main_path);
 
     // If --run flag is present, compile and execute the kernel
     if args.run {
+        print_section_header("Kernel Execution");
+        log::info!("🚀 Compiling and running the kernel...");
+
         // Run the Swift program
         let run_result = std::process::Command::new("xcrun")
             .current_dir(&args.output)
@@ -219,11 +266,13 @@ fn main() -> Result<()> {
 
         if !run_result.status.success() {
             println!(
-                "Swift compilation error: {}",
+                "\x1b[1;31mSwift compilation error:\x1b[0m\n{}",
                 String::from_utf8_lossy(&run_result.stderr)
             );
             anyhow::bail!("Swift compilation failed");
         }
+
+        log::info!("✓ Successfully compiled Swift code");
 
         // Execute the compiled program
         let execute_result = std::process::Command::new("./kernel_runner")
@@ -233,16 +282,22 @@ fn main() -> Result<()> {
 
         if !execute_result.status.success() {
             println!(
-                "Execution error: {}",
+                "\x1b[1;31mExecution error:\x1b[0m\n{}",
                 String::from_utf8_lossy(&execute_result.stderr)
             );
             anyhow::bail!("Kernel execution failed");
         }
 
-        println!(
-            "Kernel execution output:\n{}",
-            String::from_utf8_lossy(&execute_result.stdout)
-        );
+        println!("\n{}", String::from_utf8_lossy(&execute_result.stdout));
+    }
+
+    print_section_header("Summary");
+    println!("✅ \x1b[1;32mSuccessfully completed all operations!\x1b[0m");
+    if !args.run {
+        println!("\nTo run the kernel, use the --run flag or execute the following commands:");
+        println!("cd {:?}", args.output);
+        println!("xcrun -sdk macosx swiftc MetalKernelRunner.swift main.swift -o kernel_runner");
+        println!("./kernel_runner");
     }
 
     Ok(())

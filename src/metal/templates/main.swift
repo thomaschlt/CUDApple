@@ -1,24 +1,25 @@
 import Foundation
 
-{{PARAMETER_INIT}}
+print("\n=== CUDApple Kernel Execution ===")
+print("• Emulating CUDA kernel: {{KERNEL_NAME}}")
 
-// After parameter initialization
-print("\n=== Parameter Initialization ===")
-print("Problem Size: \(problemSize)")
+{{PARAMETER_INIT}}
 
 do {
     // Initialize our Metal kernel runner
     let runner = try MetalKernelRunner()
     
-    print("\n=== Running {{KERNEL_NAME}} ({{DIMENSION_TYPE}} kernel) ===")
+    let startTime = CFAbsoluteTimeGetCurrent()
     {{KERNEL_CALL}}
+    let endTime = CFAbsoluteTimeGetCurrent()
     
-    print("\n=== Kernel Results: {{KERNEL_NAME}} ===")
-    print("Input values shown above")
-    print("\nOutput values:")
+    print("• Kernel execution completed in \(String(format: "%.3f", (endTime - startTime) * 1000))ms")
+    
+    print("\n=== Results ===")
+    print("• First 5 output values:")
     for i in 0..<5 {
-        print("result[\(i)] = \(result[i])")
+        print("  [\(i)]: \(result[i])")
     }
 } catch {
-    print("Error: \(error)")
+    print("\n[ERROR] \(error)")
 }

@@ -9,6 +9,7 @@ class MetalKernelRunner {
 
     init() throws {
         print("\n=== Metal Device Detection ===")
+        print("• Scanning for compatible Metal devices...")
         
         let devices = MTLCopyAllDevices()
         guard !devices.isEmpty else {
@@ -17,7 +18,9 @@ class MetalKernelRunner {
         
         // Try to find Apple Silicon device
         if let selectedDevice = devices.first(where: { $0.name.contains("Apple") }) {
-            print("✓ Using device: \(selectedDevice.name)")
+            print("• Using device: \(selectedDevice.name)")
+            print("  ├─ Recommended max threads per threadgroup: \(selectedDevice.maxThreadsPerThreadgroup)")
+            print("  └─ Supports unified memory: \(selectedDevice.hasUnifiedMemory ? "Yes" : "No")")
             self.device = selectedDevice
         } else {
             throw MetalError.deviceNotFound
@@ -51,15 +54,17 @@ class MetalKernelRunner {
     }
     
     func allocateBuffer<T>(_ data: [T], index: Int) -> MTLBuffer? {
-        print("Allocating buffer \(index) with \(data.count) elements")
-        print("Element size: \(MemoryLayout<T>.stride) bytes")
+        print("\n• Allocating buffer \(index)")
+        print("  ├─ Elements: \(data.count)")
+        print("  └─ Size: \(MemoryLayout<T>.stride * data.count) bytes")
+        
         guard let buffer = device.makeBuffer(bytes: data,
                                            length: MemoryLayout<T>.stride * data.count,
                                            options: .storageModeShared) else {
-            print("Failed to allocate buffer \(index)")
+            print("[ERROR] Failed to allocate buffer \(index)")
             return nil
         }
-        print("Successfully allocated buffer \(index)")
+        print("• Successfully allocated buffer \(index)")
         return buffer
     }
     
