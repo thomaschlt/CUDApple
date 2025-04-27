@@ -38,4 +38,4 @@ The generator takes the AST and produces Metal shader code. This involves mappin
   - **...**
 
 ---
-Thank you for checking out CUDApple! Don't hesitate to reach out on [X](https://twitter.com/eredictus) if you have any questions or suggestions :)
+Thank you for checking out CUDApple! Don't hesitate to reach out on [X](https://twitter.com/erudictus) if you have any questions or suggestions :)
