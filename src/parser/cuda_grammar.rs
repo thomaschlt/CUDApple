@@ -8,10 +8,42 @@ peg::parser! {
         rule block_comment() = "/*" (!"*/" [_])* "*/"
         rule line_comment() = "//" (!"\n" [_])* ("\n" / ![_])
 
+        pub rule cuda_program() -> CudaProgram
+            = _ functions:(function_definition() ** _) _ {
+                let mut kernels = Vec::new();
+                let mut device_functions = Vec::new();
+
+                for func in functions {
+                    match func {
+                        FunctionDefinition::Kernel(k) => kernels.push(k),
+                        FunctionDefinition::Device(d) => device_functions.push(d),
+                    }
+                }
+
+                CudaProgram {
+                    device_code: kernels,
+                    device_functions,
+                }
+            }
+
+        rule function_definition() -> FunctionDefinition
+            = k:kernel_function() { FunctionDefinition::Kernel(k) }
+            / d:device_function() { FunctionDefinition::Device(d) }
+
         pub rule kernel_function() -> KernelFunction
             = _ "__global__" _ "void" _ name:identifier() _ "(" _ params:parameter_list()? _ ")" _ body:block() {
                 KernelFunction {
                     name,
+                    parameters: params.unwrap_or_default(),
+                    body
+                }
+            }
+
+        rule device_function() -> DeviceFunction
+            = _ "__device__" _ return_type:type_specifier() _ name:identifier() _ "(" _ params:parameter_list()? _ ")" _ body:block() {
+                DeviceFunction {
+                    name,
+                    return_type,
                     parameters: params.unwrap_or_default(),
                     body
                 }
@@ -60,25 +92,34 @@ peg::parser! {
             / compound_assignment()
             / assignment()
             / if_statement()
+            / return_statement()
             / e:expression() _ ";" { Statement::Expression(Box::new(e)) }
 
         rule variable_declaration() -> Statement
-            = var_type:type_specifier() _ name:identifier() _ ptr:"*"? _ ";" {
-                Statement::VariableDecl(Declaration {
-                    var_type: if ptr.is_some() {
-                        Type::Pointer(Box::new(var_type))
-                    } else {
-                        var_type
-                    },
-                    name,
-                    initializer: None,
-                })
-            }
-            / var_type:type_specifier() _ name:identifier() _ init:("=" _ e:expression() { e })? _ ";" {
+            = "__shared__" _ var_type:type_specifier() _ name:identifier() _ array_size:array_size()? _ ";" {
+                let var_type = if let Some(size) = array_size {
+                    Type::Array(Box::new(var_type), size)
+                } else {
+                    var_type
+                };
                 Statement::VariableDecl(Declaration {
                     var_type,
                     name,
-                    initializer: init,
+                    initializer: None,
+                    is_shared: true,
+                })
+            }
+            / var_type:type_specifier() _ name:identifier() _ array_size:array_size()? _ initializer:("=" _ expr:expression() { expr })? _ ";" {
+                let var_type = if let Some(size) = array_size {
+                    Type::Array(Box::new(var_type), size)
+                } else {
+                    var_type
+                };
+                Statement::VariableDecl(Declaration {
+                    var_type,
+                    name,
+                    initializer,
+                    is_shared: false,
                 })
             }
 
@@ -100,6 +141,12 @@ peg::parser! {
                 Statement::IfStmt {
                     condition,
                     body
+                }
+            }
+            / "if" _ "(" _ condition:expression() _ ")" _ stmt:statement() {
+                Statement::IfStmt {
+                    condition,
+                    body: Block { statements: vec![stmt] }
                 }
             }
 
@@ -124,6 +171,7 @@ peg::parser! {
                     var_type,
                     name,
                     initializer: Some(value),
+                    is_shared: false,
                 })
             }
 
@@ -168,14 +216,85 @@ peg::parser! {
             = name:identifier() { Expression::Variable(name) }
 
         rule math_function() -> Expression
-            = "max" _ "(" _ x:expression() _ "," _ y:expression() _ ")" {
+            = "fmaxf" _ "(" _ x:expression() _ "," _ y:expression() _ ")" {
+                Expression::MathFunction {
+                    name: "fmaxf".to_string(),
+                    arguments: vec![x, y],
+                }
+            }
+            / "fminf" _ "(" _ x:expression() _ "," _ y:expression() _ ")" {
+                Expression::MathFunction {
+                    name: "fminf".to_string(),
+                    arguments: vec![x, y],
+                }
+            }
+            / "max" _ "(" _ x:expression() _ "," _ y:expression() _ ")" {
                 Expression::MathFunction {
                     name: "max".to_string(),
                     arguments: vec![x, y],
                 }
             }
+            / "min" _ "(" _ x:expression() _ "," _ y:expression() _ ")" {
+                Expression::MathFunction {
+                    name: "min".to_string(),
+                    arguments: vec![x, y],
+                }
+            }
             / "expf" _ "(" _ x:expression() _ ")" {
-                Expression::MathFunction { name: "expf".to_string(), arguments: vec![x], }
+                Expression::MathFunction {
+                    name: "expf".to_string(),
+                    arguments: vec![x],
+                }
+            }
+            / "logf" _ "(" _ x:expression() _ ")" {
+                Expression::MathFunction {
+                    name: "logf".to_string(),
+                    arguments: vec![x],
+                }
+            }
+            / "sqrtf" _ "(" _ x:expression() _ ")" {
+                Expression::MathFunction {
+                    name: "sqrtf".to_string(),
+                    arguments: vec![x],
+                }
+            }
+            / "powf" _ "(" _ x:expression() _ "," _ y:expression() _ ")" {
+                Expression::MathFunction {
+                    name: "powf".to_string(),
+                    arguments: vec![x, y],
+                }
+            }
+            / "tanhf" _ "(" _ x:expression() _ ")" {
+                Expression::MathFunction {
+                    name: "tanhf".to_string(),
+                    arguments: vec![x],
+                }
+            }
+            / "fabsf" _ "(" _ x:expression() _ ")" {
+                Expression::MathFunction {
+                    name: "fabsf".to_string(),
+                    arguments: vec![x],
+                }
+            }
+            / "atomicAdd" _ "(" _ target:expression() _ "," _ value:expression() _ ")" {
+                Expression::AtomicOperation {
+                    operation: "atomicAdd".to_string(),
+                    target: Box::new(target),
+                    value: Box::new(value),
+                }
+            }
+            / name:identifier() _ "(" _ args:argument_list()? _ ")" {
+                Expression::FunctionCall {
+                    name,
+                    arguments: args.unwrap_or_default(),
+                }
+            }
+
+        rule argument_list() -> Vec<Expression>
+            = first:expression() rest:(_ "," _ e:expression() { e })* {
+                let mut args = vec![first];
+                args.extend(rest);
+                args
             }
 
         rule infinity() -> Expression
@@ -187,13 +306,24 @@ peg::parser! {
         rule expression() -> Expression = precedence! {
             x:(@) _ "&&" _ y:@ { Expression::BinaryOp(Box::new(x), Operator::LogicalAnd, Box::new(y))}
             x:(@) _ "||" _ y:@ {Expression::BinaryOp(Box::new(x), Operator::LogicalOr, Box::new(y))}
+            --
+            x:(@) _ "==" _ y:@ { Expression::BinaryOp(Box::new(x), Operator::Equal, Box::new(y)) }
+            x:(@) _ "!=" _ y:@ { Expression::BinaryOp(Box::new(x), Operator::NotEqual, Box::new(y)) }
+            x:(@) _ "<=" _ y:@ { Expression::BinaryOp(Box::new(x), Operator::LessEqual, Box::new(y)) }
+            x:(@) _ ">=" _ y:@ { Expression::BinaryOp(Box::new(x), Operator::GreaterEqual, Box::new(y)) }
             x:(@) _ "<" _ y:@ { Expression::BinaryOp(Box::new(x), Operator::LessThan, Box::new(y)) }
+            x:(@) _ ">" _ y:@ { Expression::BinaryOp(Box::new(x), Operator::GreaterThan, Box::new(y)) }
             --
             x:(@) _ "+" _ y:@ { Expression::BinaryOp(Box::new(x), Operator::Add, Box::new(y)) }
             x:(@) _ "-" _ y:@ { Expression::BinaryOp(Box::new(x), Operator::Subtract, Box::new(y)) }
             --
             x:(@) _ "*" _ y:@ { Expression::BinaryOp(Box::new(x), Operator::Multiply, Box::new(y)) }
             x:(@) _ "/" _ y:@ { Expression::BinaryOp(Box::new(x), Operator::Divide, Box::new(y)) }
+            x:(@) _ "%" _ y:@ { Expression::BinaryOp(Box::new(x), Operator::Modulo, Box::new(y)) }
+            --
+            "&" _ e:@ { Expression::UnaryOp(UnaryOperator::AddressOf, Box::new(e)) }
+            "*" _ e:@ { Expression::UnaryOp(UnaryOperator::Dereference, Box::new(e)) }
+            "-" _ e:@ { Expression::UnaryOp(UnaryOperator::Negate, Box::new(e)) }
             --
             n:number() { n }
             i:infinity() { i }
@@ -205,14 +335,27 @@ peg::parser! {
         }
 
         rule number() -> Expression
-            = n:$(['0'..='9']+ "." ['0'..='9']* "f"?) {
+            // Scientific notation with decimal: 1.23e-4f, 2.5e10f, etc.
+            = n:$(['0'..='9']+ "." ['0'..='9']* ['e' | 'E'] ['+' | '-']? ['0'..='9']+ "f"?) {
                 let n = n.trim_end_matches('f');
                 Expression::FloatLiteral(n.parse::<f32>().unwrap())
             }
+            // Scientific notation without decimal: 1e-8f, 2e10f, etc.
+            / n:$(['0'..='9']+ ['e' | 'E'] ['+' | '-']? ['0'..='9']+ "f"?) {
+                let n = n.trim_end_matches('f');
+                Expression::FloatLiteral(n.parse::<f32>().unwrap())
+            }
+            // Regular decimal: 1.23f, 4.56, etc.
+            / n:$(['0'..='9']+ "." ['0'..='9']* "f"?) {
+                let n = n.trim_end_matches('f');
+                Expression::FloatLiteral(n.parse::<f32>().unwrap())
+            }
+            // Float with f suffix: 123f
             / n:$(['0'..='9']+ "f") {
                 let n = n.trim_end_matches('f');
                 Expression::FloatLiteral(n.parse::<f32>().unwrap())
             }
+            // Regular integer: 123
             / n:$(['0'..='9']+) {
                 Expression::IntegerLiteral(n.parse().unwrap())
             }
@@ -241,5 +384,19 @@ peg::parser! {
             / "-=" { Operator::Subtract }
             / "*=" { Operator::Multiply }
             / "/=" { Operator::Divide }
+            / "%=" { Operator::Modulo }
+
+        rule return_statement() -> Statement
+            = "return" _ expr:expression() _ ";" {
+                Statement::Return(Some(Box::new(expr)))
+            }
+            / "return" _ ";" {
+                Statement::Return(None)
+            }
+
+        rule array_size() -> i64
+            = "[" _ size:$(['0'..='9']+) _ "]" {
+                size.parse().unwrap()
+            }
     }
 }

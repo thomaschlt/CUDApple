@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use clap::{ArgAction, Parser};
-use parser::unified_ast::{Expression, KernelFunction, Operator, Statement, Type};
+use parser::unified_ast::{Dimension, Expression, KernelFunction, Statement, Type};
 
 use std::fs;
 use std::path::PathBuf;
@@ -62,42 +62,48 @@ fn ensure_output_dir(path: &PathBuf) -> Result<()> {
 }
 
 fn determine_kernel_dimensions(kernel: &KernelFunction) -> u32 {
-    let has_mn_params = kernel
-        .parameters
-        .iter()
-        .any(|p| matches!(p.param_type, Type::Int) && (p.name == "M" || p.name == "N"));
+    // Special case: SGD optimizer should always be 1D
+    if kernel.name.contains("sgd_optimizer") {
+        return 1;
+    }
 
-    fn has_matrix_indexing(expr: &Expression) -> bool {
+    // Check for H,W parameters (Conv2D style) or M,N parameters (matrix style)
+    let has_2d_params = kernel.parameters.iter().any(|p| {
+        matches!(p.param_type, Type::Int)
+            && (p.name == "M" || p.name == "N" || p.name == "H" || p.name == "W")
+    });
+
+    fn has_2d_thread_indexing(expr: &Expression) -> bool {
         match expr {
-            Expression::BinaryOp(lhs, op, rhs) => match op {
-                Operator::Add => {
-                    if let Expression::BinaryOp(_, Operator::Multiply, _) = **lhs {
-                        true
-                    } else {
-                        has_matrix_indexing(lhs) || has_matrix_indexing(rhs)
-                    }
-                }
-                _ => has_matrix_indexing(lhs) || has_matrix_indexing(rhs),
-            },
+            Expression::ThreadIdx(Dimension::Y) | Expression::BlockIdx(Dimension::Y) => true,
+            Expression::BinaryOp(lhs, _, rhs) => {
+                has_2d_thread_indexing(lhs) || has_2d_thread_indexing(rhs)
+            }
             _ => false,
         }
     }
 
+    // Check if any statement uses 2D thread indexing
     for stmt in &kernel.body.statements {
-        match stmt {
-            Statement::Assign(assign) => {
-                if has_matrix_indexing(&assign.value) {
+        if let Statement::VariableDecl(decl) = stmt {
+            if let Some(init) = &decl.initializer {
+                if has_2d_thread_indexing(init) {
                     return 2;
                 }
             }
-            Statement::ForLoop { .. } => {
+        }
+        if let Statement::Assign(assign) = stmt {
+            if has_2d_thread_indexing(&assign.value) {
                 return 2;
             }
-            _ => continue,
+        }
+        // For loops also suggest 2D
+        if let Statement::ForLoop { .. } = stmt {
+            return 2;
         }
     }
 
-    if has_mn_params {
+    if has_2d_params {
         2
     } else {
         1
@@ -178,25 +184,64 @@ fn main() -> Result<()> {
         }
     }
 
+    // Select the appropriate kernel for training loops
+    let target_kernel = if cuda_program.device_code.len() > 1 {
+        // Look for the main training kernel (mnist_training_step)
+        cuda_program
+            .device_code
+            .iter()
+            .find(|k| k.name == "mnist_training_step")
+            .or_else(|| {
+                cuda_program
+                    .device_code
+                    .iter()
+                    .find(|k| k.name.contains("training_step"))
+            })
+            .unwrap_or(&cuda_program.device_code[0])
+    } else {
+        &cuda_program.device_code[0]
+    };
+
+    log::info!("🎯 Selected kernel: {}", target_kernel.name);
+
     // Generate Metal shader
     print_section_header("Metal Translation");
     let mut metal_shader = metal::MetalShader::new();
 
-    // Create config once
-    let dimensions = determine_kernel_dimensions(&cuda_program.device_code[0]);
+    // Create config using the selected kernel
+    let dimensions = determine_kernel_dimensions(target_kernel);
     let config = metal::host::MetalKernelConfig {
         dimensions,
         grid_size: match dimensions {
-            1 => (4096, 1, 1),
+            1 => {
+                // Dynamic grid size based on kernel type
+                if target_kernel.name.contains("linear_backward_bias") {
+                    (2, 1, 1) // For bias: grid_size = out_features
+                } else if target_kernel.name.contains("conv2d_backward_bias") {
+                    (16, 1, 1) // For conv2d bias: grid_size = C_out
+                } else if target_kernel.name.contains("linear_backward") {
+                    (6, 1, 1) // For other linear backward: grid_size = max(input_size, weight_size)
+                } else if target_kernel.name.contains("sgd_optimizer") {
+                    (4, 1, 1) // For SGD: grid_size = (1000 + 255) / 256 = 4 thread groups
+                } else if target_kernel.name.contains("training_step") {
+                    (4, 1, 1) // For training step: grid_size = batch_size
+                } else {
+                    (4096, 1, 1) // Default for other 1D kernels
+                }
+            }
             2 => {
-                let thread_group_size = 16;
-                let m = 1000;
-                let n = 1000;
-                (
-                    ((n + thread_group_size - 1) / thread_group_size),
-                    ((m + thread_group_size - 1) / thread_group_size),
-                    1,
-                )
+                if target_kernel.name.contains("training_step") {
+                    (4, 1, 1) // Training step: batch_size
+                } else {
+                    let thread_group_size = 16;
+                    let m = 1000;
+                    let n = 1000;
+                    (
+                        ((n + thread_group_size - 1) / thread_group_size),
+                        ((m + thread_group_size - 1) / thread_group_size),
+                        1,
+                    )
+                }
             }
             _ => panic!("Unsupported dimensions"),
         },
@@ -224,12 +269,11 @@ fn main() -> Result<()> {
     fs::write(&shader_path, metal_shader.source()).context("Failed to write Metal shader")?;
     log::info!("✓ Written Metal shader: {:?}", shader_path);
 
-    // Generate Swift host code using the same config
-    let kernel = &cuda_program.device_code[0];
+    // Generate Swift host code using the selected kernel
     let host_generator = metal::host::MetalHostGenerator::new(
         config,
-        metal_shader.source().to_string(),
-        kernel.clone(),
+        metal_shader.source_without_headers(),
+        target_kernel.clone(),
     );
     let (swift_runner_code, swift_main_code) = host_generator.generate_swift_code();
 

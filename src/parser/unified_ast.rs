@@ -3,6 +3,13 @@ use std::fmt;
 #[derive(Debug, Clone, PartialEq)]
 pub struct CudaProgram {
     pub device_code: Vec<KernelFunction>,
+    pub device_functions: Vec<DeviceFunction>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum FunctionDefinition {
+    Kernel(KernelFunction),
+    Device(DeviceFunction),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -29,6 +36,7 @@ pub enum Statement {
         operator: Operator,
         value: Expression,
     },
+    Return(Option<Box<Expression>>),
     Expression(Box<Expression>),
 }
 
@@ -37,6 +45,7 @@ pub struct Declaration {
     pub var_type: Type,
     pub name: String,
     pub initializer: Option<Expression>,
+    pub is_shared: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -53,6 +62,7 @@ pub enum Expression {
     Infinity,
     NegativeInfinity,
     BinaryOp(Box<Expression>, Operator, Box<Expression>),
+    UnaryOp(UnaryOperator, Box<Expression>),
     ThreadIdx(Dimension),
     BlockIdx(Dimension),
     BlockDim(Dimension),
@@ -64,6 +74,15 @@ pub enum Expression {
         name: String,
         arguments: Vec<Expression>,
     },
+    FunctionCall {
+        name: String,
+        arguments: Vec<Expression>,
+    },
+    AtomicOperation {
+        operation: String,
+        target: Box<Expression>,
+        value: Box<Expression>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -72,6 +91,7 @@ pub enum Type {
     Float,
     Void,
     Pointer(Box<Type>),
+    Array(Box<Type>, i64),
 }
 
 impl fmt::Display for Type {
@@ -80,7 +100,8 @@ impl fmt::Display for Type {
             Type::Void => write!(f, "void"),
             Type::Int => write!(f, "int"),
             Type::Float => write!(f, "float"),
-            Type::Pointer(inner) => write!(f, "{}*", inner),
+            Type::Pointer(inner) => write!(f, "{0}*", inner),
+            Type::Array(inner, size) => write!(f, "{0}[{1}]", inner, size),
         }
     }
 }
@@ -98,9 +119,24 @@ pub enum Operator {
     Subtract,
     Multiply,
     Divide,
+    Modulo,
     LessThan,
+    LessEqual,
+    GreaterThan,
+    GreaterEqual,
+    Equal,
+    NotEqual,
     LogicalAnd,
     LogicalOr,
+    Max,
+    Min,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum UnaryOperator {
+    AddressOf,
+    Dereference,
+    Negate,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -120,5 +156,14 @@ pub struct Parameter {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Qualifier {
     Restrict,
+    Shared,
     None,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct DeviceFunction {
+    pub name: String,
+    pub return_type: Type,
+    pub parameters: Vec<Parameter>,
+    pub body: Block,
 }

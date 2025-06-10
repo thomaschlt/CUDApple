@@ -1,0 +1,126 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.02s
+     Running `/Users/thomas/Developer/building/cudapple/target/debug/cudapple -i examples/conv2d_backward_bias.cu -d output --run -v`
+
+[1;36m╺━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╸[0m
+[1;33m   CUDApple v1.0.0[0m
+[0m   Running CUDA code directly on your Mac chip
+[1;36m╺━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╸[0m
+
+
+[1;35m=== CUDA Source Analysis ===[0m
+[1;32mINFO [0m ✓ Successfully parsed CUDA program with 1 kernels
+[1;32mINFO [0m 📦 Found kernel: conv2d_backward_bias
+[1;32mINFO [0m    ├─ Parameters: 5
+[1;32mINFO [0m 🎯 Selected kernel: conv2d_backward_bias
+
+[1;35m=== Metal Translation ===[0m
+[1;32mINFO [0m ✓ Generated Metal shader code
+[1;32mINFO [0m    ├─ Dimensions: 1
+[1;32mINFO [0m    ├─ Grid size: (16, 1, 1)
+[1;32mINFO [0m    └─ Thread group size: (256, 1, 1)
+
+[1;35m=== File Generation ===[0m
+[1;32mINFO [0m ✓ Written Metal shader: "output/kernel.metal"
+[1;32mINFO [0m ✓ Written Swift files:
+[1;32mINFO [0m    ├─ "output/MetalKernelRunner.swift"
+[1;32mINFO [0m    └─ "output/main.swift"
+
+[1;35m=== Kernel Execution ===[0m
+[1;32mINFO [0m 🚀 Compiling and running the kernel...
+[1;32mINFO [0m ✓ Successfully compiled Swift code
+
+
+=== CUDApple Kernel Execution ===
+• Emulating CUDA kernel: conv2d_backward_bias
+
+=== Input Values ===
+
+Output dimensions: 30 x 30 x 16
+grad_output[0] = 0.0
+grad_bias[0] = 0.9646511
+grad_output[1] = 0.0
+grad_bias[1] = 0.8934972
+grad_output[2] = 0.0
+grad_bias[2] = -0.39084828
+grad_output[3] = 0.0
+grad_bias[3] = -0.11696005
+grad_output[4] = 0.0
+grad_bias[4] = -0.8410994
+
+=== Metal Device Detection ===
+• Scanning for compatible Metal devices...
+• Using device: Apple M1
+  ├─ Recommended max threads per threadgroup: MTLSize(width: 1024, height: 1024, depth: 1024)
+  └─ Supports unified memory: Yes
+
+[ERROR] Error Domain=MTLLibraryErrorDomain Code=3 "program_source:18:31: error: invalid operands to binary expression ('float' and 'device atomic<float>' (aka 'device _atomic<float>'))
+                bias_gradient += grad_output[h * W_out * C_out + w * C_out + thread_position_in_grid.x];
+                ~~~~~~~~~~~~~ ^  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/System/Library/PrivateFrameworks/GPUCompiler.framework/Versions/32023/Libraries/lib/clang/32023.196/include/metal/metal_uniform:1010:32: note: candidate template ignored: cannot deduce a type for 'U' that would make 'device U' equal 'float'
+constexpr METAL_FUNC device U &operator+=(device U &u, V v) METAL_ARG_UNIFORM(v, 2)
+                               ^
+/System/Library/PrivateFrameworks/GPUCompiler.framework/Versions/32023/Libraries/lib/clang/32023.196/include/metal/metal_uniform:1112:37: note: candidate template ignored: cannot deduce a type for 'U' that would make 'threadgroup U' equal 'float'
+constexpr METAL_FUNC threadgroup U &operator+=(threadgroup U &u, V v) METAL_ARG_UNIFORM(v, 2)
+                                    ^
+/System/Library/PrivateFrameworks/GPUCompiler.framework/Versions/32023/Libraries/lib/clang/32023.196/include/metal/metal_uniform:1215:48: note: candidate template ignored: cannot deduce a type for 'U' that would make 'threadgroup_imageblock U' equal 'float'
+constexpr METAL_FUNC threadgroup_imageblock U &operator+=(threadgroup_imageblock U &u, V v) METAL_ARG_UNIFORM(v, 2)
+                                               ^
+/System/Library/PrivateFrameworks/GPUCompiler.framework/Versions/32023/Libraries/lib/clang/32023.196/include/metal/metal_uniform:1319:34: note: candidate template ignored: cannot deduce a type for 'U' that would make 'ray_data U' equal 'float'
+constexpr METAL_FUNC ray_data U &operator+=(ray_data U &u, V v) METAL_ARG_UNIFORM(v, 2)
+                                 ^
+/System/Library/PrivateFrameworks/GPUCompiler.framework/Versions/32023/Libraries/lib/clang/32023.196/include/metal/metal_uniform:908:32: note: candidate template ignored: requirement 'is_uniform_v<float>' was not satisfied [with U = float, V = metal::_atomic<float>]
+constexpr METAL_FUNC thread U &operator+=(thread U &u, V v) METAL_ARG_UNIFORM(v, 2)
+                               ^
+program_source:21:9: error: no matching function for call to 'atomic_store_explicit'
+        atomic_store_explicit(&grad_bias[thread_position_in_grid.x], bias_gradient, memory_order_relaxed);
+        ^~~~~~~~~~~~~~~~~~~~~
+/System/Library/PrivateFrameworks/GPUCompiler.framework/Versions/32023/Libraries/lib/clang/32023.196/include/metal/metal_atomic:122:17: note: candidate template ignored: requirement '_valid_store_type<threadgroup float *, void>::value' was not satisfied [with T = float, U = float]
+METAL_FUNC void atomic_store_explicit(volatile threadgroup _atomic<T> * object, U desired, memory_order order) METAL_CONST_ARG(order) METAL_VALID_STORE_ORDER(order)
+                ^
+/System/Library/PrivateFrameworks/GPUCompiler.framework/Versions/32023/Libraries/lib/clang/32023.196/include/metal/metal_atomic:127:17: note: candidate template ignored: requirement '_valid_store_type<device float *, void>::value' was not satisfied [with T = float, U = float]
+METAL_FUNC void atomic_store_explicit(volatile device _atomic<T> *object, U desired, memory_order order) METAL_CONST_ARG(order) METAL_VALID_STORE_ORDER(order)
+                ^
+program_source:16:31: warning: comparison of integers of different signs: 'int32_t' (aka 'int') and 'const constant uint' (aka 'const constant unsigned int') [-Wsign-compare]
+        for (int32_t h = 0; h < H_out; h = h + 1) {
+                            ~ ^ ~~~~~
+program_source:17:35: warning: comparison of integers of different signs: 'int32_t' (aka 'int') and 'const constant uint' (aka 'const constant unsigned int') [-Wsign-compare]
+            for (int32_t w = 0; w < W_out; w = w + 1) {
+                                ~ ^ ~~~~~
+" UserInfo={NSLocalizedDescription=program_source:18:31: error: invalid operands to binary expression ('float' and 'device atomic<float>' (aka 'device _atomic<float>'))
+                bias_gradient += grad_output[h * W_out * C_out + w * C_out + thread_position_in_grid.x];
+                ~~~~~~~~~~~~~ ^  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/System/Library/PrivateFrameworks/GPUCompiler.framework/Versions/32023/Libraries/lib/clang/32023.196/include/metal/metal_uniform:1010:32: note: candidate template ignored: cannot deduce a type for 'U' that would make 'device U' equal 'float'
+constexpr METAL_FUNC device U &operator+=(device U &u, V v) METAL_ARG_UNIFORM(v, 2)
+                               ^
+/System/Library/PrivateFrameworks/GPUCompiler.framework/Versions/32023/Libraries/lib/clang/32023.196/include/metal/metal_uniform:1112:37: note: candidate template ignored: cannot deduce a type for 'U' that would make 'threadgroup U' equal 'float'
+constexpr METAL_FUNC threadgroup U &operator+=(threadgroup U &u, V v) METAL_ARG_UNIFORM(v, 2)
+                                    ^
+/System/Library/PrivateFrameworks/GPUCompiler.framework/Versions/32023/Libraries/lib/clang/32023.196/include/metal/metal_uniform:1215:48: note: candidate template ignored: cannot deduce a type for 'U' that would make 'threadgroup_imageblock U' equal 'float'
+constexpr METAL_FUNC threadgroup_imageblock U &operator+=(threadgroup_imageblock U &u, V v) METAL_ARG_UNIFORM(v, 2)
+                                               ^
+/System/Library/PrivateFrameworks/GPUCompiler.framework/Versions/32023/Libraries/lib/clang/32023.196/include/metal/metal_uniform:1319:34: note: candidate template ignored: cannot deduce a type for 'U' that would make 'ray_data U' equal 'float'
+constexpr METAL_FUNC ray_data U &operator+=(ray_data U &u, V v) METAL_ARG_UNIFORM(v, 2)
+                                 ^
+/System/Library/PrivateFrameworks/GPUCompiler.framework/Versions/32023/Libraries/lib/clang/32023.196/include/metal/metal_uniform:908:32: note: candidate template ignored: requirement 'is_uniform_v<float>' was not satisfied [with U = float, V = metal::_atomic<float>]
+constexpr METAL_FUNC thread U &operator+=(thread U &u, V v) METAL_ARG_UNIFORM(v, 2)
+                               ^
+program_source:21:9: error: no matching function for call to 'atomic_store_explicit'
+        atomic_store_explicit(&grad_bias[thread_position_in_grid.x], bias_gradient, memory_order_relaxed);
+        ^~~~~~~~~~~~~~~~~~~~~
+/System/Library/PrivateFrameworks/GPUCompiler.framework/Versions/32023/Libraries/lib/clang/32023.196/include/metal/metal_atomic:122:17: note: candidate template ignored: requirement '_valid_store_type<threadgroup float *, void>::value' was not satisfied [with T = float, U = float]
+METAL_FUNC void atomic_store_explicit(volatile threadgroup _atomic<T> * object, U desired, memory_order order) METAL_CONST_ARG(order) METAL_VALID_STORE_ORDER(order)
+                ^
+/System/Library/PrivateFrameworks/GPUCompiler.framework/Versions/32023/Libraries/lib/clang/32023.196/include/metal/metal_atomic:127:17: note: candidate template ignored: requirement '_valid_store_type<device float *, void>::value' was not satisfied [with T = float, U = float]
+METAL_FUNC void atomic_store_explicit(volatile device _atomic<T> *object, U desired, memory_order order) METAL_CONST_ARG(order) METAL_VALID_STORE_ORDER(order)
+                ^
+program_source:16:31: warning: comparison of integers of different signs: 'int32_t' (aka 'int') and 'const constant uint' (aka 'const constant unsigned int') [-Wsign-compare]
+        for (int32_t h = 0; h < H_out; h = h + 1) {
+                            ~ ^ ~~~~~
+program_source:17:35: warning: comparison of integers of different signs: 'int32_t' (aka 'int') and 'const constant uint' (aka 'const constant unsigned int') [-Wsign-compare]
+            for (int32_t w = 0; w < W_out; w = w + 1) {
+                                ~ ^ ~~~~~
+}
+
+
+[1;35m=== Summary ===[0m
+✅ [1;32mSuccessfully completed all operations![0m

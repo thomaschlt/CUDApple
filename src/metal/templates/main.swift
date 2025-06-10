@@ -17,7 +17,7 @@ do {
     
     print("\n=== Results ===")
     print("• First 5 output values:")
-    for i in 0..<5 {
+    for i in 0..<min(5, result.count) {
         print("  [\(i)]: \(result[i])")
     }
 } catch {

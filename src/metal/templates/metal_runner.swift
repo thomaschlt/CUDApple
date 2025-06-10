@@ -72,10 +72,16 @@ class MetalKernelRunner {
         // Add debug prints for input buffers
         print("\n=== Buffer Contents Before Kernel Execution ===")
         for (index, buffer) in inputs.enumerated() {
-            let ptr = buffer.contents().assumingMemoryBound(to: Float.self)
-            print("Buffer \(index) first 5 elements:")
-            for i in 0..<5 {
-                print("  [\(i)]: \(ptr[i])")
+            // Check if this is a UInt32 buffer (small size indicates scalar)
+            if buffer.length == MemoryLayout<UInt32>.size {
+                let ptr = buffer.contents().assumingMemoryBound(to: UInt32.self)
+                print("Buffer \(index) (UInt32): \(ptr[0])")
+            } else {
+                let ptr = buffer.contents().assumingMemoryBound(to: Float.self)
+                print("Buffer \(index) first 5 elements:")
+                for i in 0..<5 {
+                    print("  [\(i)]: \(ptr[i])")
+                }
             }
         }
         
@@ -125,10 +131,16 @@ class MetalKernelRunner {
         // Add verification after kernel execution
         print("\n=== Buffer Contents After Kernel Execution ===")
         for (index, buffer) in inputs.enumerated() {
-            let ptr = buffer.contents().assumingMemoryBound(to: Float.self)
-            print("Buffer \(index) first 5 elements:")
-            for i in 0..<5 {
-                print("  [\(i)]: \(ptr[i])")
+            // Check if this is a UInt32 buffer (small size indicates scalar)
+            if buffer.length == MemoryLayout<UInt32>.size {
+                let ptr = buffer.contents().assumingMemoryBound(to: UInt32.self)
+                print("Buffer \(index) (UInt32): \(ptr[0])")
+            } else {
+                let ptr = buffer.contents().assumingMemoryBound(to: Float.self)
+                print("Buffer \(index) first 5 elements:")
+                for i in 0..<5 {
+                    print("  [\(i)]: \(ptr[i])")
+                }
             }
         }
     }
@@ -143,6 +155,19 @@ class MetalKernelRunner {
             firstArray.count
         } else {
             throw MetalError.invalidInput
+        }
+        
+        // For softmax kernels, adjust problem size to be batch_size instead of total elements
+        let adjustedProblemSize: Int
+        // Check if this looks like a softmax kernel (4 inputs: input, output, batch_size, num_classes)
+        if inputs.count == 4, 
+           let batchSize = inputs[2].data as? UInt32,
+           let numClasses = inputs[3].data as? UInt32 {
+            // This is likely a softmax kernel, use batch_size as problem size
+            adjustedProblemSize = Int(batchSize)
+            print("• Detected softmax kernel: using batch_size (\(batchSize)) as problem size instead of total elements (\(problemSize))")
+        } else {
+            adjustedProblemSize = problemSize
         }
         
         // Allocate and copy input data
@@ -162,16 +187,20 @@ class MetalKernelRunner {
             }
         }
         
-        try self.run(inputs: buffers, problemSize: problemSize)
+        try self.run(inputs: buffers, problemSize: adjustedProblemSize)
         
-        // Read back the result from the output buffer (res)
-        guard buffers.count > 2 else {
+        let outputBufferIndex = {{OUTPUT_BUFFER_INDEX}}
+        guard buffers.count > outputBufferIndex else {
             throw MetalError.invalidInput
         }
         
-        let outputBuffer = buffers[2] // res is the third buffer
+        let outputBuffer = buffers[outputBufferIndex]
         let outputPtr = outputBuffer.contents().assumingMemoryBound(to: T.self)
-        return Array(UnsafeBufferPointer(start: outputPtr, count: problemSize))
+        
+
+        let outputCount = outputBuffer.length / MemoryLayout<T>.stride
+        
+        return Array(UnsafeBufferPointer(start: outputPtr, count: outputCount))
     }
 
     func readOutput<T>(buffer: MTLBuffer, type: T.Type) -> [T] {
